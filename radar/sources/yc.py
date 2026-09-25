@@ -1,59 +1,24 @@
-"""Y Combinator & early-stage startup public discovery source."""
+"""Y Combinator startup discovery placeholder.
 
-import httpx
+CLAUDE.md hard rule: "Wellfound and YC appear only through Tavily search
+results." YC/Work at a Startup requires a logged-in session for its job API
+and must never be crawled directly. YC coverage comes entirely from
+TavilySearchSource's site:ycombinator.com/companies query instead (see
+radar/sources/tavily.py). This source is kept as a no-op so `config.yaml`'s
+`sources.yc` toggle and the CLI's `--source yc` selector keep working, and so
+a future *public*, non-logged-in YC API could be wired in here without
+touching run.py or the source registry.
+"""
 
 from radar.sources.base import JobSource, RawOpening
 
 
 class YCStartupSource(JobSource):
-    """Discovers openings at YC companies from public feeds and directories."""
+    """Intentionally inert — see module docstring. YC discovery happens via Tavily."""
 
     @property
     def name(self) -> str:
         return "yc"
 
     def discover(self, cursor: str | None = None) -> tuple[list[RawOpening], str | None]:
-        openings: list[RawOpening] = []
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-        }
-
-        # YC Work at a Startup public search API
-        try:
-            with httpx.Client(timeout=12.0, headers=headers) as client:
-                url = "https://www.workatastartup.com/api/jobs"
-                # Public filter parameters for engineering / intern / junior
-                res = client.get(url, params={"roles": "Engineering", "limit": 20})
-                if res.status_code == 200:
-                    data = res.json()
-                    jobs = data.get("jobs", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-                    for j in jobs[:20]:
-                        company = j.get("company", {}) or {}
-                        company_name = company.get("name", "YC Startup")
-                        domain = company.get("website", f"{company_name.lower().replace(' ', '')}.com")
-                        title = j.get("title", "")
-                        job_id = j.get("id")
-                        apply_url = j.get("apply_url") or f"https://www.workatastartup.com/jobs/{job_id}"
-
-                        loc = j.get("location", "")
-                        remote = j.get("remote", False) or "remote" in loc.lower()
-
-                        openings.append(
-                            RawOpening(
-                                company_name=company_name,
-                                company_domain=domain,
-                                title=title,
-                                apply_url=apply_url,
-                                source="yc",
-                                location=loc,
-                                remote=remote,
-                                posted_at=j.get("created_at"),
-                                description=j.get("description", "")[:500],
-                                extra={"batch": company.get("batch")},
-                            )
-                        )
-        except Exception:
-            pass
-
-        return openings, cursor
+        return [], cursor

@@ -20,18 +20,30 @@ class TavilySearchSource(JobSource):
     def name(self) -> str:
         return "tavily"
 
-    def _build_queries(self) -> list[str]:
+    ATS_DOMAINS = ["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co"]
+
+    def _build_queries(self) -> list[tuple[str, list[str]]]:
+        """Returns (query, include_domains) pairs. YC/Wellfound must only ever be
+        reached through Tavily search results, never crawled directly (hard rule) —
+        so a YC-scoped query with its own include_domains is added alongside the
+        ATS-scoped ones."""
         targets = self.config.get("targets", {})
         roles = targets.get("roles", ["AI engineer", "backend engineer"])[:3]
         seniorities = targets.get("seniority", ["intern", "fresher"])[:2]
         locations = targets.get("locations", ["India", "remote"])[:2]
+        seniority_a = seniorities[0] if seniorities else "intern"
+        seniority_b = seniorities[1] if len(seniorities) > 1 else seniority_a
 
-        queries = []
-        for role in roles:
-            # Query targeted at ATS job links
-            q = f'"{role}" ({seniorities[0]} OR {seniorities[1] if len(seniorities) > 1 else ""}) ({" OR ".join(locations)}) (site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co)'
-            queries.append(q)
-        return queries[:2]  # Keep queries low to stay well within free tier
+        queries: list[tuple[str, list[str]]] = []
+        for role in roles[:2]:
+            q = f'"{role}" ({seniority_a} OR {seniority_b}) ({" OR ".join(locations)}) (site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co)'
+            queries.append((q, self.ATS_DOMAINS))
+
+        if roles:
+            yc_query = f'site:ycombinator.com/companies "{roles[0]}" {seniority_a} jobs'
+            queries.append((yc_query, ["ycombinator.com"]))
+
+        return queries[:3]  # Keep queries low to stay well within free tier
 
     def discover(self, cursor: str | None = None) -> tuple[list[RawOpening], str | None]:
         if not self.api_key:
@@ -42,13 +54,13 @@ class TavilySearchSource(JobSource):
 
         headers = {"Content-Type": "application/json"}
         with httpx.Client(timeout=15.0) as client:
-            for q in queries:
+            for q, include_domains in queries:
                 try:
                     payload = {
                         "api_key": self.api_key,
                         "query": q,
                         "search_depth": "basic",
-                        "include_domains": ["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co"],
+                        "include_domains": include_domains,
                         "max_results": 10,
                     }
                     res = client.post("https://api.tavily.com/search", json=payload, headers=headers)
@@ -65,6 +77,7 @@ class TavilySearchSource(JobSource):
                             match_ashby = re.search(r"jobs\.ashbyhq\.com/([^/]+)", url)
                             match_gh = re.search(r"boards\.greenhouse\.io/([^/]+)", url)
                             match_lever = re.search(r"jobs\.lever\.co/([^/]+)", url)
+                            match_yc = re.search(r"ycombinator\.com/companies/([^/]+)", url)
 
                             # Track the underlying ATS board so it can be added to the
                             # ATS sources' watchlist for future runs (auto-discovery growth loop).
@@ -80,6 +93,10 @@ class TavilySearchSource(JobSource):
                             elif match_lever:
                                 discovered_platform, discovered_slug = "lever", match_lever.group(1)
                                 company_name = discovered_slug.replace("-", " ").capitalize()
+                            elif match_yc:
+                                # YC's own directory has no public ATS API to add to a watchlist —
+                                # it stays reachable only via this Tavily search, per policy.
+                                company_name = match_yc.group(1).replace("-", " ").capitalize()
                             elif " - " in title:
                                 company_name = title.split(" - ")[-1].strip()
 

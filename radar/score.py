@@ -75,7 +75,7 @@ def compute_heuristic_score(
         reasons.append("Located in India")
 
     # Stage alignment
-    stage = company_research.get("stage", "").lower()
+    stage = (company_research.get("stage") or "").lower()
     target_stages = [s.lower() for s in config.get("targets", {}).get("stages", [])]
     if any(ts in stage for ts in target_stages):
         score += 5

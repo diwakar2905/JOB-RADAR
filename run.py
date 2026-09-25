@@ -29,7 +29,7 @@ from radar.normalize import compute_dedupe_hash, infer_seniority, normalize_loca
 from radar.notifier import notify
 from radar.profile import load_profile
 from radar.research import CompanyResearcher
-from radar.score import FitScorer
+from radar.score import FitScorer, compute_heuristic_score
 from radar.sources import (
     ATSSource,
     HackerNewsHiringSource,
@@ -173,20 +173,46 @@ def execute_pipeline(
             if not link_healthy:
                 print(f"[!] Warning: Dead or unreachable apply link for {item.company_name} - {item.title}: {item.apply_url}")
 
-            # 4. Research company (14-day cached)
-            company_info = researcher.research_company(item.company_name, item.company_domain)
-
-            # 5. Score Fit (0-100) with citation URLs
             inferred_sen = item.seniority or infer_seniority(item.title, item.description)
-            opening_dict = {
-                "title": item.title,
-                "location": item.location,
-                "remote": item.remote,
-                "apply_url": item.apply_url,
-                "description": item.description,
-                "seniority": inferred_sen,
-            }
-            score_res = scorer.score_fit(profile, config, opening_dict, company_info)
+
+            if dry_run:
+                # Contract: --dry-run never writes to the DB and never spends LLM/API
+                # budget. Skip real company research (Tavily + DB writes) and real
+                # scoring (Claude/Ollama) entirely; use a free heuristic-only preview.
+                preview_company = {
+                    "id": None,
+                    "name": item.company_name,
+                    "domain": item.company_domain,
+                    "stage": None,
+                    "funding": None,
+                    "founders": None,
+                    "summary": "",
+                    "sources": [],
+                }
+                score_res = compute_heuristic_score(
+                    profile,
+                    config,
+                    item.title,
+                    item.location,
+                    item.remote,
+                    item.company_name,
+                    preview_company,
+                    item.apply_url,
+                )
+            else:
+                # 4. Research company (14-day cached)
+                company_info = researcher.research_company(item.company_name, item.company_domain)
+
+                # 5. Score Fit (0-100) with citation URLs
+                opening_dict = {
+                    "title": item.title,
+                    "location": item.location,
+                    "remote": item.remote,
+                    "apply_url": item.apply_url,
+                    "description": item.description,
+                    "seniority": inferred_sen,
+                }
+                score_res = scorer.score_fit(profile, config, opening_dict, company_info)
 
             print(f"  + [{score_res.score}/100] {item.company_name} - {item.title} ({norm_loc})")
             print(f"    Reason: {score_res.reason}")

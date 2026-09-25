@@ -119,7 +119,7 @@ def matches_target_roles(title: str, target_roles: list[str]) -> bool:
         if all(term in title_lower for term in r_terms):
             return True
 
-    return True
+    return False
 
 
 def apply_filters(opening: RawOpening, config: dict[str, Any]) -> FilterResult:
