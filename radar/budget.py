@@ -2,11 +2,12 @@
 
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
-from radar.db import record_api_cost, get_monthly_api_cost_cents, DEFAULT_DB_PATH
+from typing import Any
+
+from radar.db import DEFAULT_DB_PATH, get_monthly_api_cost_cents, record_api_cost
 
 
-def get_configured_spend_cap(config: Optional[Dict[str, Any]] = None) -> float:
+def get_configured_spend_cap(config: dict[str, Any] | None = None) -> float:
     """Return configured monthly cap in cents (defaults to 500 cents = $5.00)."""
     env_cap = os.getenv("MONTHLY_SPEND_CAP_CENTS")
     if env_cap:
@@ -21,7 +22,7 @@ def get_configured_spend_cap(config: Optional[Dict[str, Any]] = None) -> float:
     return 500.0  # $5.00 limit
 
 
-def is_budget_exceeded(config: Optional[Dict[str, Any]] = None, db_path: Path = DEFAULT_DB_PATH) -> bool:
+def is_budget_exceeded(config: dict[str, Any] | None = None, db_path: Path = DEFAULT_DB_PATH) -> bool:
     """Returns True if current month's estimated API spend exceeds the cap."""
     cap = get_configured_spend_cap(config)
     spent = get_monthly_api_cost_cents(db_path)

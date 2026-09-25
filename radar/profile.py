@@ -1,12 +1,11 @@
 """Candidate Profile Extractor and Manager for Job Radar."""
 
-import os
-import sys
+import argparse
 import json
 import re
-import argparse
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 import httpx
 
 
@@ -15,10 +14,11 @@ def parse_resume_text(resume_path: str) -> str:
     path = Path(resume_path)
     if not path.exists():
         raise FileNotFoundError(f"Resume file not found at {resume_path}")
-    
+
     if path.suffix.lower() == ".pdf":
         try:
             from pypdf import PdfReader
+
             reader = PdfReader(str(path))
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             return text.strip()
@@ -34,18 +34,13 @@ def parse_resume_text(resume_path: str) -> str:
             return f.read().strip()
 
 
-def fetch_github_profile(username_or_url: str) -> Dict[str, Any]:
+def fetch_github_profile(username_or_url: str) -> dict[str, Any]:
     """Fetch public repos, stars, and languages from GitHub public API."""
     username = username_or_url.strip().rstrip("/").split("/")[-1]
     headers = {"User-Agent": "JobRadar/1.0", "Accept": "application/vnd.github.v3+json"}
-    
-    profile_info = {
-        "username": username,
-        "bio": "",
-        "public_repos": 0,
-        "top_repositories": []
-    }
-    
+
+    profile_info = {"username": username, "bio": "", "public_repos": 0, "top_repositories": []}
+
     try:
         with httpx.Client(timeout=10.0, headers=headers) as client:
             user_res = client.get(f"https://api.github.com/users/{username}")
@@ -61,17 +56,19 @@ def fetch_github_profile(username_or_url: str) -> Dict[str, Any]:
                 for repo in repos:
                     if repo.get("fork"):
                         continue
-                    profile_info["top_repositories"].append({
-                        "name": repo.get("name"),
-                        "description": repo.get("description") or "",
-                        "language": repo.get("language") or "",
-                        "stars": repo.get("stargazers_count", 0),
-                        "url": repo.get("html_url"),
-                        "topics": repo.get("topics", [])
-                    })
+                    profile_info["top_repositories"].append(
+                        {
+                            "name": repo.get("name"),
+                            "description": repo.get("description") or "",
+                            "language": repo.get("language") or "",
+                            "stars": repo.get("stargazers_count", 0),
+                            "url": repo.get("html_url"),
+                            "topics": repo.get("topics", []),
+                        }
+                    )
     except Exception as e:
         profile_info["error"] = str(e)
-    
+
     return profile_info
 
 
@@ -94,7 +91,7 @@ def fetch_personal_site(url: str) -> str:
     return ""
 
 
-def load_profile(profile_path: str = "profile.json") -> Dict[str, Any]:
+def load_profile(profile_path: str = "profile.json") -> dict[str, Any]:
     """Load profile from disk. Creates default starter if not found."""
     path = Path(profile_path)
     if not path.exists():
@@ -106,16 +103,16 @@ def load_profile(profile_path: str = "profile.json") -> Dict[str, Any]:
             "skills": ["Python", "FastAPI", "PyTorch", "LLMs", "PostgreSQL", "Docker"],
             "stack": ["Python", "PyTorch", "FastAPI", "Streamlit"],
             "best_projects": [],
-            "proof_points": []
+            "proof_points": [],
         }
         save_profile(default_profile, profile_path)
         return default_profile
-        
+
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_profile(data: Dict[str, Any], profile_path: str = "profile.json") -> None:
+def save_profile(data: dict[str, Any], profile_path: str = "profile.json") -> None:
     with open(profile_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
@@ -129,16 +126,33 @@ def main():
     args = parser.parse_args()
 
     profile = load_profile(args.output)
-    
+
     if args.resume:
         print(f"Reading resume from {args.resume}...")
         resume_text = parse_resume_text(args.resume)
         profile["resume_raw_summary"] = resume_text[:1000]
         # Basic keyword heuristics
         found_skills = set(profile.get("skills", []))
-        common_tech = ["Python", "PyTorch", "TensorFlow", "FastAPI", "Django", "React", "Next.js", 
-                       "TypeScript", "Docker", "Kubernetes", "PostgreSQL", "MongoDB", "Redis", 
-                       "AWS", "GCP", "LLMs", "LangChain", "RAG"]
+        common_tech = [
+            "Python",
+            "PyTorch",
+            "TensorFlow",
+            "FastAPI",
+            "Django",
+            "React",
+            "Next.js",
+            "TypeScript",
+            "Docker",
+            "Kubernetes",
+            "PostgreSQL",
+            "MongoDB",
+            "Redis",
+            "AWS",
+            "GCP",
+            "LLMs",
+            "LangChain",
+            "RAG",
+        ]
         for tech in common_tech:
             if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
                 found_skills.add(tech)

@@ -1,31 +1,22 @@
 """Job Radar - Local Streamlit Review Queue and Application Dashboard."""
 
 import streamlit as st
-import json
-import yaml
-from pathlib import Path
-from datetime import datetime
 
 from radar.db import (
-    init_db,
     get_matches_for_dashboard,
-    update_match_status,
-    update_match_feedback,
     get_pipeline_stats,
-    DEFAULT_DB_PATH
+    init_db,
+    update_match_feedback,
+    update_match_status,
 )
-from radar.profile import load_profile, save_profile
-from run import execute_pipeline, load_config
+from radar.profile import load_profile
+from run import execute_pipeline
 
-st.set_page_config(
-    page_title="Job Radar",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Job Radar", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
 # Custom Styling
-st.markdown("""
+st.markdown(
+    """
 <style>
     .main-header {
         font-size: 2.2rem;
@@ -89,7 +80,9 @@ st.markdown("""
         font-weight: 600;
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Initialize Database
 init_db()
@@ -105,7 +98,7 @@ with st.sidebar:
     col_s1, col_s2 = st.columns(2)
     col_s1.metric("Tracked", stats["total_openings"])
     col_s2.metric("New Fits", stats["new_matches"])
-    
+
     col_s3, col_s4 = st.columns(2)
     col_s3.metric("Applied", stats["applied"])
     col_s4.metric("Interviews", stats["interviewing"])
@@ -116,7 +109,7 @@ with st.sidebar:
     st.progress(min(1.0, spent_dollars / 5.0), text=f"Est. Monthly API Spend: ${spent_dollars:.2f} / $5.00")
 
     st.divider()
-    
+
     # Manual trigger button
     if st.button("⚡ Run Discovery Pipeline Now", use_container_width=True, type="primary"):
         with st.spinner("Discovering openings, researching companies & scoring fit..."):
@@ -141,25 +134,34 @@ with st.sidebar:
 
 # Main Screen
 st.markdown('<div class="main-header">Job Radar — Review Queue</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Ranked early-stage startup & tech openings with verified 1-click apply links.</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="sub-header">Ranked early-stage startup & tech openings with verified 1-click apply links.</div>',
+    unsafe_allow_html=True,
+)
 
 # Tabs for Application Status
-tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs([
-    f"📥 New Queue ({stats['new_matches']})",
-    f"⭐ Saved ({stats['saved']})",
-    f"🚀 Applied ({stats['applied']})",
-    f"🎯 Interviewing ({stats['interviewing']})",
-    "🗄️ All / Archive"
-])
+tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs(
+    [
+        f"📥 New Queue ({stats['new_matches']})",
+        f"⭐ Saved ({stats['saved']})",
+        f"🚀 Applied ({stats['applied']})",
+        f"🎯 Interviewing ({stats['interviewing']})",
+        "🗄️ All / Archive",
+    ]
+)
 
 current_tab = "new"
-if tab_saved._is_selected if hasattr(tab_saved, '_is_selected') else False:
+if tab_saved._is_selected if hasattr(tab_saved, "_is_selected") else False:
     current_tab = "saved"
 
 # Filters bar
 f_col1, f_col2, f_col3 = st.columns([2, 1, 1])
 with f_col1:
-    search_query = st.text_input("Search by company or role keyword", placeholder="e.g. AI, Backend, Cursor, Postman", label_visibility="collapsed")
+    search_query = st.text_input(
+        "Search by company or role keyword",
+        placeholder="e.g. AI, Backend, Cursor, Postman",
+        label_visibility="collapsed",
+    )
 with f_col2:
     min_score = st.slider("Min Fit Score", 0, 100, 50, step=5, label_visibility="collapsed")
 with f_col3:
@@ -178,7 +180,7 @@ def render_matches_list(status_filter: str):
         matches = [m for m in matches if m["remote"]]
 
     if not matches:
-        st.info(f"No openings found in this view. Click '⚡ Run Discovery Pipeline Now' in the sidebar or adjust your filter.")
+        st.info("No openings found in this view. Click '⚡ Run Discovery Pipeline Now' in the sidebar or adjust your filter.")
         return
 
     st.caption(f"Showing {len(matches)} matching roles sorted by Fit Score.")
@@ -189,28 +191,31 @@ def render_matches_list(status_filter: str):
         link_healthy = m.get("status_head_ok", 1) == 1
 
         with st.container():
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class="job-card">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <div>
                         <span class="{score_class}">Fit Score: {score}/100</span>
-                        <span class="source-tag" style="margin-left: 8px;">{m['source']}</span>
-                        {'' if link_healthy else '<span class="link-warning" style="margin-left: 8px;">⚠️ Verify Apply Link</span>'}
-                        <h3 style="margin-top: 8px; margin-bottom: 4px;">{m['title']}</h3>
+                        <span class="source-tag" style="margin-left: 8px;">{m["source"]}</span>
+                        {"" if link_healthy else '<span class="link-warning" style="margin-left: 8px;">⚠️ Verify Apply Link</span>'}
+                        <h3 style="margin-top: 8px; margin-bottom: 4px;">{m["title"]}</h3>
                         <div style="font-size: 1.05rem; font-weight: 600; color: #334155;">
-                            {m['company_name']} · <span style="font-weight: 400; color: #64748B;">{m['opening_location']} {(' (Remote)' if m['remote'] else '')}</span>
+                            {m["company_name"]} · <span style="font-weight: 400; color: #64748B;">{m["opening_location"]} {(" (Remote)" if m["remote"] else "")}</span>
                         </div>
                     </div>
                 </div>
                 <div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px;">
-                    <strong>Why it fits:</strong> {m['reason']}
+                    <strong>Why it fits:</strong> {m["reason"]}
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             # Action and Details row
             btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([2, 1.5, 1.5, 1.5, 1.5])
-            
+
             with btn_col1:
                 st.link_button("↗ Direct Apply Link", m["apply_url"], use_container_width=True, type="primary")
 
@@ -256,7 +261,7 @@ def render_matches_list(status_filter: str):
                 col_c3.write(f"**Founders:** {m.get('founders') or 'Undisclosed'}")
 
                 st.write(f"**Overview:** {m.get('company_summary') or 'Tech company developing innovative software.'}")
-                
+
                 # Verified Source URLs
                 st.write("**Verified Evidence & Citations:**")
                 all_sources = list(set((m.get("match_sources") or []) + (m.get("company_sources") or [])))

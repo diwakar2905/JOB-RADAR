@@ -1,9 +1,7 @@
 """Normalization and deduplication utilities for job openings."""
 
-import re
 import hashlib
-from typing import Optional, Tuple
-from radar.sources.base import RawOpening
+import re
 
 
 def clean_company_domain(domain: str) -> str:
@@ -25,7 +23,7 @@ def normalize_title(title: str) -> str:
     return title
 
 
-def normalize_location(location: Optional[str], remote_hint: bool = False) -> Tuple[str, bool]:
+def normalize_location(location: str | None, remote_hint: bool = False) -> tuple[str, bool]:
     """Normalize location string and determine remote flag."""
     if not location:
         return ("Remote", True) if remote_hint else ("Unspecified", False)
@@ -33,7 +31,9 @@ def normalize_location(location: Optional[str], remote_hint: bool = False) -> Tu
     loc_lower = location.lower()
     is_remote = remote_hint or "remote" in loc_lower or "anywhere" in loc_lower or "wfh" in loc_lower
 
-    if "india" in loc_lower or any(c in loc_lower for c in ["bengaluru", "bangalore", "delhi", "hyderabad", "mumbai", "pune", "gurgaon", "noida"]):
+    if "india" in loc_lower or any(
+        c in loc_lower for c in ["bengaluru", "bangalore", "delhi", "hyderabad", "mumbai", "pune", "gurgaon", "noida"]
+    ):
         normalized_loc = "India" if not any(c in loc_lower for c in ["bengaluru", "bangalore"]) else "Bengaluru, India"
     elif is_remote:
         normalized_loc = "Remote"
@@ -43,7 +43,7 @@ def normalize_location(location: Optional[str], remote_hint: bool = False) -> Tu
     return normalized_loc, is_remote
 
 
-def infer_seniority(title: str, description: Optional[str] = None) -> str:
+def infer_seniority(title: str, description: str | None = None) -> str:
     """Infer seniority from title and description."""
     text = (title + " " + (description or "")).lower()
 
@@ -62,7 +62,7 @@ def infer_seniority(title: str, description: Optional[str] = None) -> str:
     return "early-career"
 
 
-def compute_dedupe_hash(company_domain: str, title: str, location: Optional[str] = None) -> str:
+def compute_dedupe_hash(company_domain: str, title: str, location: str | None = None) -> str:
     """
     Generate SHA-256 dedupe hash based on domain + normalized title + normalized location.
     Per TRD: 'Dedupe on a hash of company domain + role title + location.'

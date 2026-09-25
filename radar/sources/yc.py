@@ -1,7 +1,7 @@
 """Y Combinator & early-stage startup public discovery source."""
 
 import httpx
-from typing import List, Optional, Tuple
+
 from radar.sources.base import JobSource, RawOpening
 
 
@@ -12,11 +12,11 @@ class YCStartupSource(JobSource):
     def name(self) -> str:
         return "yc"
 
-    def discover(self, cursor: Optional[str] = None) -> Tuple[List[RawOpening], Optional[str]]:
-        openings: List[RawOpening] = []
+    def discover(self, cursor: str | None = None) -> tuple[list[RawOpening], str | None]:
+        openings: list[RawOpening] = []
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json"
+            "Accept": "application/json",
         }
 
         # YC Work at a Startup public search API
@@ -35,22 +35,24 @@ class YCStartupSource(JobSource):
                         title = j.get("title", "")
                         job_id = j.get("id")
                         apply_url = j.get("apply_url") or f"https://www.workatastartup.com/jobs/{job_id}"
-                        
+
                         loc = j.get("location", "")
                         remote = j.get("remote", False) or "remote" in loc.lower()
 
-                        openings.append(RawOpening(
-                            company_name=company_name,
-                            company_domain=domain,
-                            title=title,
-                            apply_url=apply_url,
-                            source="yc",
-                            location=loc,
-                            remote=remote,
-                            posted_at=j.get("created_at"),
-                            description=j.get("description", "")[:500],
-                            extra={"batch": company.get("batch")}
-                        ))
+                        openings.append(
+                            RawOpening(
+                                company_name=company_name,
+                                company_domain=domain,
+                                title=title,
+                                apply_url=apply_url,
+                                source="yc",
+                                location=loc,
+                                remote=remote,
+                                posted_at=j.get("created_at"),
+                                description=j.get("description", "")[:500],
+                                extra={"batch": company.get("batch")},
+                            )
+                        )
         except Exception:
             pass
 

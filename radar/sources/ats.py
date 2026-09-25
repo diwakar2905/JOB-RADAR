@@ -1,26 +1,26 @@
 """Public ATS job feeds source: Greenhouse, Lever, and Ashby."""
 
 import httpx
-from typing import List, Dict, Any, Optional, Tuple
+
 from radar.sources.base import JobSource, RawOpening
 
 
 class ATSSource(JobSource):
     """Fetches job postings directly from public ATS JSON endpoints."""
 
-    def __init__(self, watchlist_config: Optional[Dict[str, List[str]]] = None):
+    def __init__(self, watchlist_config: dict[str, list[str]] | None = None):
         self.watchlist = watchlist_config or {
             "greenhouse": ["postman", "browserstack", "perplexity", "mistral", "replicate"],
             "lever": ["hasura"],
-            "ashby": ["cursor", "modal", "elevenlabs", "ramp"]
+            "ashby": ["cursor", "modal", "elevenlabs", "ramp"],
         }
 
     @property
     def name(self) -> str:
         return "ats"
 
-    def discover(self, cursor: Optional[str] = None) -> Tuple[List[RawOpening], Optional[str]]:
-        openings: List[RawOpening] = []
+    def discover(self, cursor: str | None = None) -> tuple[list[RawOpening], str | None]:
+        openings: list[RawOpening] = []
         headers = {"User-Agent": "JobRadar/1.0 (Job Aggregator; personal use)"}
 
         with httpx.Client(timeout=12.0, headers=headers) as client:
@@ -38,20 +38,23 @@ class ATSSource(JobSource):
                                 location_str = job["location"].get("name", "")
                             elif isinstance(job.get("location"), str):
                                 location_str = job.get("location", "")
-                            
+
                             is_remote = "remote" in location_str.lower() or "remote" in job.get("title", "").lower()
-                            
-                            openings.append(RawOpening(
-                                company_name=slug.capitalize(),
-                                company_domain=company_domain,
-                                title=job.get("title", ""),
-                                apply_url=job.get("absolute_url") or f"https://boards.greenhouse.io/{slug}/jobs/{job.get('id')}",
-                                source="greenhouse",
-                                location=location_str,
-                                remote=is_remote,
-                                posted_at=job.get("updated_at"),
-                                extra={"ats_id": job.get("id"), "ats_slug": slug}
-                            ))
+
+                            openings.append(
+                                RawOpening(
+                                    company_name=slug.capitalize(),
+                                    company_domain=company_domain,
+                                    title=job.get("title", ""),
+                                    apply_url=job.get("absolute_url")
+                                    or f"https://boards.greenhouse.io/{slug}/jobs/{job.get('id')}",
+                                    source="greenhouse",
+                                    location=location_str,
+                                    remote=is_remote,
+                                    posted_at=job.get("updated_at"),
+                                    extra={"ats_id": job.get("id"), "ats_slug": slug},
+                                )
+                            )
                 except Exception:
                     continue
 
@@ -67,19 +70,23 @@ class ATSSource(JobSource):
                             categories = job.get("categories") or {}
                             loc = categories.get("location") or ""
                             workplace = job.get("workplaceType", "").lower()
-                            is_remote = workplace == "remote" or "remote" in loc.lower() or "remote" in job.get("text", "").lower()
+                            is_remote = (
+                                workplace == "remote" or "remote" in loc.lower() or "remote" in job.get("text", "").lower()
+                            )
 
-                            openings.append(RawOpening(
-                                company_name=slug.capitalize(),
-                                company_domain=company_domain,
-                                title=job.get("text", ""),
-                                apply_url=job.get("applyUrl") or job.get("hostedUrl"),
-                                source="lever",
-                                location=loc,
-                                remote=is_remote,
-                                posted_at=str(job.get("createdAt")),
-                                extra={"ats_id": job.get("id"), "ats_slug": slug}
-                            ))
+                            openings.append(
+                                RawOpening(
+                                    company_name=slug.capitalize(),
+                                    company_domain=company_domain,
+                                    title=job.get("text", ""),
+                                    apply_url=job.get("applyUrl") or job.get("hostedUrl"),
+                                    source="lever",
+                                    location=loc,
+                                    remote=is_remote,
+                                    posted_at=str(job.get("createdAt")),
+                                    extra={"ats_id": job.get("id"), "ats_slug": slug},
+                                )
+                            )
                 except Exception:
                     continue
 
@@ -93,17 +100,19 @@ class ATSSource(JobSource):
                         company_domain = f"{slug}.com"
                         for job in data.get("jobs", []):
                             is_remote = job.get("isRemote", False) or "remote" in job.get("title", "").lower()
-                            openings.append(RawOpening(
-                                company_name=slug.capitalize(),
-                                company_domain=company_domain,
-                                title=job.get("title", ""),
-                                apply_url=job.get("jobUrl") or f"https://jobs.ashbyhq.com/{slug}/{job.get('id')}",
-                                source="ashby",
-                                location=job.get("location", ""),
-                                remote=is_remote,
-                                posted_at=job.get("publishedAt"),
-                                extra={"ats_id": job.get("id"), "ats_slug": slug}
-                            ))
+                            openings.append(
+                                RawOpening(
+                                    company_name=slug.capitalize(),
+                                    company_domain=company_domain,
+                                    title=job.get("title", ""),
+                                    apply_url=job.get("jobUrl") or f"https://jobs.ashbyhq.com/{slug}/{job.get('id')}",
+                                    source="ashby",
+                                    location=job.get("location", ""),
+                                    remote=is_remote,
+                                    posted_at=job.get("publishedAt"),
+                                    extra={"ats_id": job.get("id"), "ats_slug": slug},
+                                )
+                            )
                 except Exception:
                     continue
 

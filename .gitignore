@@ -2,6 +2,11 @@
 .env
 *.env
 
+# Personal data (never committed)
+profile.json
+data/
+logs/
+
 # SQLite Database
 *.sqlite
 *.sqlite3

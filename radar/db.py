@@ -1,10 +1,10 @@
 """SQLite Database operations and schema management for Job Radar."""
 
-import sqlite3
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any
 
 DEFAULT_DB_PATH = Path("db.sqlite")
 
@@ -94,10 +94,10 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 def get_or_create_company(
     name: str,
     domain: str,
-    stage: Optional[str] = None,
-    funding: Optional[str] = None,
-    location: Optional[str] = None,
-    db_path: Path = DEFAULT_DB_PATH
+    stage: str | None = None,
+    funding: str | None = None,
+    location: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
     """Returns company id; creates company record if not found."""
     domain_clean = domain.strip().lower()
@@ -106,11 +106,11 @@ def get_or_create_company(
         row = cur.fetchone()
         if row:
             return row["id"]
-        
+
         cur = conn.execute(
             """INSERT INTO companies (name, domain, stage, funding, location)
                VALUES (?, ?, ?, ?, ?)""",
-            (name.strip(), domain_clean, stage, funding, location)
+            (name.strip(), domain_clean, stage, funding, location),
         )
         conn.commit()
         return cur.lastrowid
@@ -118,12 +118,12 @@ def get_or_create_company(
 
 def update_company_research(
     company_id: int,
-    stage: Optional[str],
-    funding: Optional[str],
-    founders: Optional[str],
-    summary: Optional[str],
-    sources: List[str],
-    db_path: Path = DEFAULT_DB_PATH
+    stage: str | None,
+    funding: str | None,
+    founders: str | None,
+    summary: str | None,
+    sources: list[str],
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     sources_json = json.dumps(sources)
@@ -137,12 +137,12 @@ def update_company_research(
                    sources = ?,
                    researched_at = ?
                WHERE id = ?""",
-            (stage, funding, founders, summary, sources_json, now, company_id)
+            (stage, funding, founders, summary, sources_json, now, company_id),
         )
         conn.commit()
 
 
-def get_company_by_id(company_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+def get_company_by_id(company_id: int, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any] | None:
     with get_connection(db_path) as conn:
         cur = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,))
         row = cur.fetchone()
@@ -157,7 +157,7 @@ def get_company_by_id(company_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optio
         return res
 
 
-def get_company_by_domain(domain: str, db_path: Path = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+def get_company_by_domain(domain: str, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any] | None:
     with get_connection(db_path) as conn:
         cur = conn.execute("SELECT * FROM companies WHERE domain = ?", (domain.strip().lower(),))
         row = cur.fetchone()
@@ -181,22 +181,33 @@ def opening_exists_by_hash(dedupe_hash: str, db_path: Path = DEFAULT_DB_PATH) ->
 def insert_opening(
     company_id: int,
     title: str,
-    seniority: Optional[str],
-    location: Optional[str],
+    seniority: str | None,
+    location: str | None,
     remote: bool,
     apply_url: str,
     source: str,
     dedupe_hash: str,
-    posted_at: Optional[str] = None,
+    posted_at: str | None = None,
     status_head_ok: bool = True,
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
     with get_connection(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO openings
                (company_id, title, seniority, location, remote, apply_url, source, posted_at, dedupe_hash, status_head_ok)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (company_id, title, seniority, location, 1 if remote else 0, apply_url, source, posted_at, dedupe_hash, 1 if status_head_ok else 0)
+            (
+                company_id,
+                title,
+                seniority,
+                location,
+                1 if remote else 0,
+                apply_url,
+                source,
+                posted_at,
+                dedupe_hash,
+                1 if status_head_ok else 0,
+            ),
         )
         conn.commit()
         return cur.lastrowid
@@ -206,16 +217,16 @@ def insert_match(
     opening_id: int,
     score: int,
     reason: str,
-    sources: List[str],
+    sources: list[str],
     status: str = "new",
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
     sources_json = json.dumps(sources)
     with get_connection(db_path) as conn:
         cur = conn.execute(
             """INSERT INTO matches (opening_id, score, reason, sources, status)
                VALUES (?, ?, ?, ?, ?)""",
-            (opening_id, score, reason, sources_json, status)
+            (opening_id, score, reason, sources_json, status),
         )
         conn.commit()
         return cur.lastrowid
@@ -224,31 +235,25 @@ def insert_match(
 def update_match_status(match_id: int, status: str, db_path: Path = DEFAULT_DB_PATH) -> None:
     now = datetime.now(timezone.utc).isoformat()
     with get_connection(db_path) as conn:
-        conn.execute(
-            "UPDATE matches SET status = ?, updated_at = ? WHERE id = ?",
-            (status, now, match_id)
-        )
+        conn.execute("UPDATE matches SET status = ?, updated_at = ? WHERE id = ?", (status, now, match_id))
         conn.commit()
 
 
 def update_match_feedback(match_id: int, feedback: str, db_path: Path = DEFAULT_DB_PATH) -> None:
     now = datetime.now(timezone.utc).isoformat()
     with get_connection(db_path) as conn:
-        conn.execute(
-            "UPDATE matches SET feedback = ?, updated_at = ? WHERE id = ?",
-            (feedback, now, match_id)
-        )
+        conn.execute("UPDATE matches SET feedback = ?, updated_at = ? WHERE id = ?", (feedback, now, match_id))
         conn.commit()
 
 
 def get_matches_for_dashboard(
-    status: Optional[str] = None,
-    min_score: Optional[int] = None,
-    limit: Optional[int] = 100,
-    db_path: Path = DEFAULT_DB_PATH
-) -> List[Dict[str, Any]]:
+    status: str | None = None,
+    min_score: int | None = None,
+    limit: int | None = 100,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
     query = """
-    SELECT 
+    SELECT
         m.id AS match_id,
         m.score,
         m.reason,
@@ -279,7 +284,7 @@ def get_matches_for_dashboard(
     JOIN companies c ON o.company_id = c.id
     WHERE 1=1
     """
-    params: List[Any] = []
+    params: list[Any] = []
     if status and status != "all":
         query += " AND m.status = ?"
         params.append(status)
@@ -304,7 +309,7 @@ def get_matches_for_dashboard(
                     d["match_sources"] = []
             else:
                 d["match_sources"] = []
-            
+
             if d.get("company_sources"):
                 try:
                     d["company_sources"] = json.loads(d["company_sources"])
@@ -316,24 +321,19 @@ def get_matches_for_dashboard(
         return results
 
 
-def record_run_start(sources: List[str], db_path: Path = DEFAULT_DB_PATH) -> int:
+def record_run_start(sources: list[str], db_path: Path = DEFAULT_DB_PATH) -> int:
     now = datetime.now(timezone.utc).isoformat()
     sources_json = json.dumps(sources)
     with get_connection(db_path) as conn:
         cur = conn.execute(
             "INSERT INTO runs (started_at, sources_checked, new_openings, errors) VALUES (?, ?, 0, '[]')",
-            (now, sources_json)
+            (now, sources_json),
         )
         conn.commit()
         return cur.lastrowid
 
 
-def record_run_finish(
-    run_id: int,
-    new_openings: int,
-    errors: List[str],
-    db_path: Path = DEFAULT_DB_PATH
-) -> None:
+def record_run_finish(run_id: int, new_openings: int, errors: list[str], db_path: Path = DEFAULT_DB_PATH) -> None:
     now = datetime.now(timezone.utc).isoformat()
     errors_json = json.dumps(errors)
     with get_connection(db_path) as conn:
@@ -341,12 +341,12 @@ def record_run_finish(
             """UPDATE runs
                SET finished_at = ?, new_openings = ?, errors = ?
                WHERE id = ?""",
-            (now, new_openings, errors_json, run_id)
+            (now, new_openings, errors_json, run_id),
         )
         conn.commit()
 
 
-def get_source_cursor(source: str, db_path: Path = DEFAULT_DB_PATH) -> Optional[str]:
+def get_source_cursor(source: str, db_path: Path = DEFAULT_DB_PATH) -> str | None:
     with get_connection(db_path) as conn:
         cur = conn.execute("SELECT cursor FROM source_cursors WHERE source = ?", (source,))
         row = cur.fetchone()
@@ -362,21 +362,16 @@ def set_source_cursor(source: str, cursor: str, db_path: Path = DEFAULT_DB_PATH)
                ON CONFLICT(source) DO UPDATE SET
                    last_checked_at = excluded.last_checked_at,
                    cursor = excluded.cursor""",
-            (source, now, cursor)
+            (source, now, cursor),
         )
         conn.commit()
 
 
-def record_api_cost(
-    provider: str,
-    endpoint: str,
-    cost_cents: float,
-    db_path: Path = DEFAULT_DB_PATH
-) -> None:
+def record_api_cost(provider: str, endpoint: str, cost_cents: float, db_path: Path = DEFAULT_DB_PATH) -> None:
     with get_connection(db_path) as conn:
         conn.execute(
             "INSERT INTO api_usage (provider, endpoint, cost_cents) VALUES (?, ?, ?)",
-            (provider, endpoint, cost_cents)
+            (provider, endpoint, cost_cents),
         )
         conn.commit()
 
@@ -386,15 +381,12 @@ def get_monthly_api_cost_cents(db_path: Path = DEFAULT_DB_PATH) -> float:
     now = datetime.now(timezone.utc)
     first_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc).isoformat()
     with get_connection(db_path) as conn:
-        cur = conn.execute(
-            "SELECT SUM(cost_cents) as total FROM api_usage WHERE timestamp >= ?",
-            (first_of_month,)
-        )
+        cur = conn.execute("SELECT SUM(cost_cents) as total FROM api_usage WHERE timestamp >= ?", (first_of_month,))
         row = cur.fetchone()
         return float(row["total"] or 0.0)
 
 
-def get_pipeline_stats(db_path: Path = DEFAULT_DB_PATH) -> Dict[str, Any]:
+def get_pipeline_stats(db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     with get_connection(db_path) as conn:
         total_openings = conn.execute("SELECT COUNT(*) FROM openings").fetchone()[0]
         total_matches = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0]
@@ -402,11 +394,9 @@ def get_pipeline_stats(db_path: Path = DEFAULT_DB_PATH) -> Dict[str, Any]:
         applied = conn.execute("SELECT COUNT(*) FROM matches WHERE status = 'applied'").fetchone()[0]
         interviewing = conn.execute("SELECT COUNT(*) FROM matches WHERE status = 'interviewing'").fetchone()[0]
         saved = conn.execute("SELECT COUNT(*) FROM matches WHERE status = 'saved'").fetchone()[0]
-        
-        last_run = conn.execute(
-            "SELECT * FROM runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        
+
+        last_run = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+
         return {
             "total_openings": total_openings,
             "total_matches": total_matches,
@@ -415,5 +405,5 @@ def get_pipeline_stats(db_path: Path = DEFAULT_DB_PATH) -> Dict[str, Any]:
             "interviewing": interviewing,
             "saved": saved,
             "last_run": dict(last_run) if last_run else None,
-            "monthly_cost_cents": get_monthly_api_cost_cents(db_path)
+            "monthly_cost_cents": get_monthly_api_cost_cents(db_path),
         }

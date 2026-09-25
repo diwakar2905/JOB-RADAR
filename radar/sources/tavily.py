@@ -2,15 +2,17 @@
 
 import os
 import re
+from typing import Any
+
 import httpx
-from typing import List, Optional, Tuple, Dict, Any
+
 from radar.sources.base import JobSource, RawOpening
 
 
 class TavilySearchSource(JobSource):
     """Discovers hiring posts via Tavily Search API based on targeting config."""
 
-    def __init__(self, api_key: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, api_key: str | None = None, config: dict[str, Any] | None = None):
         self.api_key = api_key or os.getenv("TAVILY_API_KEY")
         self.config = config or {}
 
@@ -18,7 +20,7 @@ class TavilySearchSource(JobSource):
     def name(self) -> str:
         return "tavily"
 
-    def _build_queries(self) -> List[str]:
+    def _build_queries(self) -> list[str]:
         targets = self.config.get("targets", {})
         roles = targets.get("roles", ["AI engineer", "backend engineer"])[:3]
         seniorities = targets.get("seniority", ["intern", "fresher"])[:2]
@@ -27,15 +29,15 @@ class TavilySearchSource(JobSource):
         queries = []
         for role in roles:
             # Query targeted at ATS job links
-            q = f'"{role}" ({seniorities[0]} OR {seniorities[1] if len(seniorities)>1 else ""}) ({" OR ".join(locations)}) (site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co)'
+            q = f'"{role}" ({seniorities[0]} OR {seniorities[1] if len(seniorities) > 1 else ""}) ({" OR ".join(locations)}) (site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co)'
             queries.append(q)
         return queries[:2]  # Keep queries low to stay well within free tier
 
-    def discover(self, cursor: Optional[str] = None) -> Tuple[List[RawOpening], Optional[str]]:
+    def discover(self, cursor: str | None = None) -> tuple[list[RawOpening], str | None]:
         if not self.api_key:
             return [], cursor
 
-        openings: List[RawOpening] = []
+        openings: list[RawOpening] = []
         queries = self._build_queries()
 
         headers = {"Content-Type": "application/json"}
@@ -47,7 +49,7 @@ class TavilySearchSource(JobSource):
                         "query": q,
                         "search_depth": "basic",
                         "include_domains": ["jobs.ashbyhq.com", "boards.greenhouse.io", "jobs.lever.co"],
-                        "max_results": 10
+                        "max_results": 10,
                     }
                     res = client.post("https://api.tavily.com/search", json=payload, headers=headers)
                     if res.status_code == 200:
@@ -81,16 +83,18 @@ class TavilySearchSource(JobSource):
 
                             is_remote = "remote" in snippet.lower() or "remote" in title.lower()
 
-                            openings.append(RawOpening(
-                                company_name=company_name,
-                                company_domain=domain,
-                                title=cleaned_title,
-                                apply_url=url,
-                                source="tavily",
-                                remote=is_remote,
-                                description=snippet,
-                                extra={"query": q}
-                            ))
+                            openings.append(
+                                RawOpening(
+                                    company_name=company_name,
+                                    company_domain=domain,
+                                    title=cleaned_title,
+                                    apply_url=url,
+                                    source="tavily",
+                                    remote=is_remote,
+                                    description=snippet,
+                                    extra={"query": q},
+                                )
+                            )
                 except Exception:
                     continue
 

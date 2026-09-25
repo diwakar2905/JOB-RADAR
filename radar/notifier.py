@@ -27,9 +27,9 @@ def notify(title: str, message: str) -> None:
             """
             subprocess.Popen(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
         except Exception:
             pass

@@ -1,19 +1,26 @@
 """Company research agent with 14-day SQLite caching and source URL requirements."""
 
+import json
 import os
 import re
-import json
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 import httpx
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
-from radar.db import get_company_by_domain, update_company_research, get_or_create_company, DEFAULT_DB_PATH
-from radar.llm import LLMClient
+
 from radar.budget import is_budget_exceeded, record_cost
+from radar.db import (
+    DEFAULT_DB_PATH,
+    get_company_by_domain,
+    get_or_create_company,
+    update_company_research,
+)
+from radar.llm import LLMClient
 
 CACHE_TTL_DAYS = 14
 
 
-def is_research_fresh(researched_at_iso: Optional[str]) -> bool:
+def is_research_fresh(researched_at_iso: str | None) -> bool:
     """Returns True if researched within CACHE_TTL_DAYS."""
     if not researched_at_iso:
         return False
@@ -28,11 +35,11 @@ def is_research_fresh(researched_at_iso: Optional[str]) -> bool:
 class CompanyResearcher:
     """Researches company stage, funding, founders, and product with local SQLite caching."""
 
-    def __init__(self, llm_client: Optional[LLMClient] = None, tavily_key: Optional[str] = None):
+    def __init__(self, llm_client: LLMClient | None = None, tavily_key: str | None = None):
         self.llm = llm_client or LLMClient()
         self.tavily_key = tavily_key or os.getenv("TAVILY_API_KEY")
 
-    def research_company(self, company_name: str, domain: str, db_path=DEFAULT_DB_PATH) -> Dict[str, Any]:
+    def research_company(self, company_name: str, domain: str, db_path=DEFAULT_DB_PATH) -> dict[str, Any]:
         """
         Retrieves company research. Returns cached data if fresh (<= 14 days).
         Otherwise fetches fresh intelligence and updates SQLite.
@@ -56,7 +63,7 @@ class CompanyResearcher:
                     "api_key": self.tavily_key,
                     "query": query,
                     "search_depth": "basic",
-                    "max_results": 3
+                    "max_results": 3,
                 }
                 with httpx.Client(timeout=10.0) as client:
                     res = client.post("https://api.tavily.com/search", json=payload, headers=headers)
@@ -66,7 +73,7 @@ class CompanyResearcher:
                             search_snippets.append(r.get("content", ""))
                             if r.get("url") and r["url"] not in sources:
                                 sources.append(r["url"])
-                        record_cost("tavily", "search", 0.5, db_path=db_path) # ~0.5 cents per search
+                        record_cost("tavily", "search", 0.5, db_path=db_path)  # ~0.5 cents per search
             except Exception:
                 pass
 
@@ -114,7 +121,7 @@ Return a valid JSON object ONLY with the following keys:
             founders=founders,
             summary=summary,
             sources=sources,
-            db_path=db_path
+            db_path=db_path,
         )
 
         return {
@@ -126,5 +133,5 @@ Return a valid JSON object ONLY with the following keys:
             "founders": founders,
             "summary": summary,
             "sources": sources,
-            "researched_at": datetime.now(timezone.utc).isoformat()
+            "researched_at": datetime.now(timezone.utc).isoformat(),
         }
