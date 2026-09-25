@@ -321,6 +321,56 @@ def get_matches_for_dashboard(
         return results
 
 
+def get_feedback_examples(limit: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
+    """Most recent good/bad feedback entries, for few-shot calibration in scoring prompts."""
+    query = """
+    SELECT o.title, c.name AS company_name, m.reason, m.feedback, m.score
+    FROM matches m
+    JOIN openings o ON m.opening_id = o.id
+    JOIN companies c ON o.company_id = c.id
+    WHERE m.feedback IS NOT NULL
+    ORDER BY m.updated_at DESC
+    LIMIT ?
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_feedback_entries(db_path: Path = DEFAULT_DB_PATH) -> int:
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM matches WHERE feedback IS NOT NULL").fetchone()
+        return int(row[0] or 0)
+
+
+def record_discovered_ats_board(platform: str, slug: str, db_path: Path = DEFAULT_DB_PATH) -> None:
+    """Records a Greenhouse/Lever/Ashby board slug found via Tavily search for the ATS
+    sources to pick up starting next run (the auto-discovery growth loop). Stored as a
+    single JSON-encoded list under the 'ats_discovered' cursor row."""
+    discovered = get_discovered_ats_boards(db_path=db_path)
+    if platform not in discovered:
+        return
+    if slug not in discovered[platform]:
+        discovered[platform].append(slug)
+        set_source_cursor("ats_discovered", json.dumps(discovered), db_path=db_path)
+
+
+def get_discovered_ats_boards(db_path: Path = DEFAULT_DB_PATH) -> dict[str, list[str]]:
+    """Returns {"greenhouse": [...], "lever": [...], "ashby": [...]} of slugs discovered
+    by Tavily search in prior runs."""
+    default: dict[str, list[str]] = {"greenhouse": [], "lever": [], "ashby": []}
+    raw = get_source_cursor("ats_discovered", db_path=db_path)
+    if not raw:
+        return default
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return default
+    for platform in default:
+        default[platform] = [s for s in data.get(platform, []) if isinstance(s, str)]
+    return default
+
+
 def record_run_start(sources: list[str], db_path: Path = DEFAULT_DB_PATH) -> int:
     now = datetime.now(timezone.utc).isoformat()
     sources_json = json.dumps(sources)

@@ -3,11 +3,14 @@
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from radar.budget import is_budget_exceeded, record_cost
-from radar.db import DEFAULT_DB_PATH
+from radar.db import DEFAULT_DB_PATH, count_feedback_entries, get_feedback_examples
 from radar.llm import LLMClient
+
+MIN_FEEDBACK_FOR_CALIBRATION = 5
 
 
 @dataclass
@@ -90,6 +93,33 @@ class FitScorer:
 
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
+        self._calibration_prompt_block: str | None = None
+
+    def _get_calibration_block(self, db_path: Path) -> str:
+        """Builds a few-shot calibration block from past 👍/👎 feedback, once per run.
+
+        No model training — just recent good/bad examples fed back into the prompt,
+        per SPEC.md §9.5. No-ops below MIN_FEEDBACK_FOR_CALIBRATION entries.
+        """
+        if self._calibration_prompt_block is not None:
+            return self._calibration_prompt_block
+
+        if count_feedback_entries(db_path=db_path) < MIN_FEEDBACK_FOR_CALIBRATION:
+            self._calibration_prompt_block = ""
+            return self._calibration_prompt_block
+
+        examples = get_feedback_examples(limit=10, db_path=db_path)
+        lines = [
+            f'- {"GOOD" if ex["feedback"] == "good" else "BAD"} fit: "{ex["title"]}" at {ex["company_name"]} '
+            f"(scored {ex['score']}) — {ex['reason']}"
+            for ex in examples
+        ]
+        self._calibration_prompt_block = (
+            "\nCalibration — how I judged similar past matches (learn from these, don't repeat mistakes):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+        return self._calibration_prompt_block
 
     def score_fit(
         self,
@@ -143,7 +173,7 @@ Company Context:
 Stage: {company.get("stage")} | Funding: {company.get("funding")}
 Summary: {company.get("summary")}
 Available Source URLs: {available_sources}
-
+{self._get_calibration_block(db_path)}
 Guardrail Rules:
 1. Score from 0 to 100 based on role relevance, tech stack fit, and builder potential.
 2. Provide a crisp 1-2 line reason explaining specifically why this role fits or does not fit.
