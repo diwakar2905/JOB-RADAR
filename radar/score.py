@@ -2,29 +2,30 @@
 
 import json
 import re
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-from radar.llm import LLMClient
+from typing import Any
+
 from radar.budget import is_budget_exceeded, record_cost
 from radar.db import DEFAULT_DB_PATH
+from radar.llm import LLMClient
 
 
 @dataclass
 class ScoreResult:
     score: int
     reason: str
-    sources: List[str]
+    sources: list[str]
 
 
 def compute_heuristic_score(
-    profile: Dict[str, Any],
-    config: Dict[str, Any],
+    profile: dict[str, Any],
+    config: dict[str, Any],
     opening_title: str,
-    opening_location: Optional[str],
+    opening_location: str | None,
     is_remote: bool,
     company_name: str,
-    company_research: Dict[str, Any],
-    apply_url: str
+    company_research: dict[str, Any],
+    apply_url: str,
 ) -> ScoreResult:
     """Heuristic scoring when external LLM is offline or budget exceeded."""
     score = 60
@@ -41,13 +42,11 @@ def compute_heuristic_score(
     profile_roles = [r.lower() for r in profile.get("roles_sought", [])]
 
     # Title match bonus
-    matched_role = False
     for r in profile_roles:
         terms = r.split()
         if any(t in title_lower for t in terms if len(t) > 2):
             score += 15
             reasons.append(f"Direct match with target role '{r}'")
-            matched_role = True
             break
 
     # Seniority bonus
@@ -83,26 +82,22 @@ def compute_heuristic_score(
     final_score = max(10, min(98, score))
     summary_reason = "; ".join(reasons) if reasons else f"Role at {company_name} aligns with software engineering fundamentals."
 
-    return ScoreResult(
-        score=final_score,
-        reason=summary_reason[:250],
-        sources=sources[:3]
-    )
+    return ScoreResult(score=final_score, reason=summary_reason[:250], sources=sources[:3])
 
 
 class FitScorer:
     """Scores candidate fit (0-100) using Claude or Ollama with mandatory citation URLs."""
 
-    def __init__(self, llm_client: Optional[LLMClient] = None):
+    def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
 
     def score_fit(
         self,
-        profile: Dict[str, Any],
-        config: Dict[str, Any],
-        opening: Dict[str, Any],
-        company: Dict[str, Any],
-        db_path=DEFAULT_DB_PATH
+        profile: dict[str, Any],
+        config: dict[str, Any],
+        opening: dict[str, Any],
+        company: dict[str, Any],
+        db_path=DEFAULT_DB_PATH,
     ) -> ScoreResult:
         apply_url = opening.get("apply_url", "")
         available_sources = [apply_url]
@@ -113,39 +108,40 @@ class FitScorer:
         # If budget exceeded, fall back to heuristic
         if is_budget_exceeded(config, db_path=db_path):
             return compute_heuristic_score(
-                profile, config,
+                profile,
+                config,
                 opening.get("title", ""),
                 opening.get("location"),
                 opening.get("remote", False),
                 company.get("name", ""),
                 company,
-                apply_url
+                apply_url,
             )
 
         prompt = f"""You are the Job Fit Evaluator for Job Radar. Evaluate the candidate fit for this opening on a 0-100 scale.
 
 Candidate Profile:
-Name: {profile.get('name')}
-Headline: {profile.get('headline')}
-Target Roles: {profile.get('roles_sought')}
-Seniority: {profile.get('seniority')}
-Skills: {profile.get('skills')}
-Key Projects: {json.dumps(profile.get('best_projects', []))}
+Name: {profile.get("name")}
+Headline: {profile.get("headline")}
+Target Roles: {profile.get("roles_sought")}
+Seniority: {profile.get("seniority")}
+Skills: {profile.get("skills")}
+Key Projects: {json.dumps(profile.get("best_projects", []))}
 
 Target Preferences (from config.yaml):
-Priorities: {config.get('priorities')}
-Target Locations: {config.get('targets', {}).get('locations')}
+Priorities: {config.get("priorities")}
+Target Locations: {config.get("targets", {}).get("locations")}
 
 Opening Details:
-Company: {company.get('name')} ({company.get('domain')})
-Title: {opening.get('title')}
-Location: {opening.get('location')} (Remote: {opening.get('remote')})
-Job Description Snippet: {opening.get('description', 'N/A')}
+Company: {company.get("name")} ({company.get("domain")})
+Title: {opening.get("title")}
+Location: {opening.get("location")} (Remote: {opening.get("remote")})
+Job Description Snippet: {opening.get("description", "N/A")}
 Apply Link: {apply_url}
 
 Company Context:
-Stage: {company.get('stage')} | Funding: {company.get('funding')}
-Summary: {company.get('summary')}
+Stage: {company.get("stage")} | Funding: {company.get("funding")}
+Summary: {company.get("summary")}
 Available Source URLs: {available_sources}
 
 Guardrail Rules:
@@ -176,21 +172,18 @@ Output ONLY valid JSON in this exact schema:
                 if not valid_sources:
                     valid_sources = [apply_url]
 
-                return ScoreResult(
-                    score=max(0, min(100, score)),
-                    reason=reason.strip(),
-                    sources=valid_sources
-                )
+                return ScoreResult(score=max(0, min(100, score)), reason=reason.strip(), sources=valid_sources)
             except Exception:
                 pass
 
         # Heuristic fallback if LLM response couldn't be parsed or was unavailable
         return compute_heuristic_score(
-            profile, config,
+            profile,
+            config,
             opening.get("title", ""),
             opening.get("location"),
             opening.get("remote", False),
             company.get("name", ""),
             company,
-            apply_url
+            apply_url,
         )

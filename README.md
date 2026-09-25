@@ -46,23 +46,31 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configure Your Profile & Targeting
-- **`profile.json`**: Pre-filled for CSE (AIML) builder. Update projects, skills, and links anytime:
+- **`profile.json`**: Never committed (personal data). Copy the starter template and edit it, or let
+  the CLI build one for you:
   ```bash
-  # Or auto-extract from your resume / GitHub:
-  python -m radar.profile --resume resume.pdf --github diwakarmishra
+  cp profile.example.json profile.json   # then edit by hand, or:
+  python -m radar profile --resume data/resume.pdf --github diwakarmishra
   ```
 - **`config.yaml`**: Set target roles, locations (`India`, `remote`), seniority (`intern`, `fresher`, `junior`), company watchlist, and dealbreakers.
 - **`.env`**: Add your optional API keys (`ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, `OLLAMA_HOST`). Job Radar includes a fallback scoring engine that works even without paid API keys!
 
 ### 3. Run the Discovery Pipeline
 ```bash
+# Check config, keys, Ollama, and DB health first:
+python -m radar doctor
+
 # Run full discovery pipeline across all sources:
-python run.py
+python -m radar run
+# (equivalently: python run.py)
 
 # Or run specific sources:
-python run.py --source ats --limit 10
-python run.py --source hn --limit 5
-python run.py --dry-run
+python -m radar run --source ats --limit 10
+python -m radar run --source hn --limit 5
+python -m radar run --dry-run   # no DB writes, no LLM scoring spend
+
+# Rebuild profile.json from resume/GitHub/site:
+python -m radar profile --resume data/resume.pdf --github diwakarmishra
 ```
 
 ### 4. Launch the Local Dashboard
@@ -73,18 +81,32 @@ Open **`http://localhost:8501`** in your browser.
 
 ---
 
-## 🖥 Automated Background Scheduling (Windows)
+## 🖥 Automated Background Scheduling
 
-To run Job Radar automatically every 6 hours in the background (even after restarting or waking from sleep):
+Job Radar can run unattended every `schedule_hours` (default 6), catching up on
+whatever it missed after the laptop was asleep or off.
 
-Open PowerShell as Administrator and run:
+**Windows** (PowerShell as Administrator):
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1
+powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1 -Uninstall
+```
+
+**macOS** (launchd):
+```bash
+scripts/install_schedule_mac.sh
+scripts/install_schedule_mac.sh --uninstall
+```
+
+**Linux** (cron):
+```bash
+scripts/install_schedule_linux.sh
+scripts/install_schedule_linux.sh --uninstall
 ```
 
 - **Overlap Prevention**: Uses a single-instance lock file (`job_radar.lock`).
 - **Gap & Sleep Tolerance**: Tracks progress via `source_cursors` in SQLite; missed runs catch up seamlessly.
-- **Non-blocking Desktop Alerts**: Sends Windows notifications when high-fit matches (>= 80) are found.
+- **Non-blocking Desktop Alerts**: Sends a notification when high-fit matches (>= 80) are found.
 
 ---
 

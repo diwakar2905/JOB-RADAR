@@ -1,42 +1,41 @@
 """Job Radar autonomous background pipeline runner."""
 
+import argparse
+import atexit
 import os
 import sys
-import yaml
-import json
-import atexit
-import argparse
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import Any
+
+import yaml
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from radar.db import (
-    init_db,
-    opening_exists_by_hash,
-    insert_opening,
-    insert_match,
-    record_run_start,
-    record_run_finish,
     get_source_cursor,
+    init_db,
+    insert_match,
+    insert_opening,
+    opening_exists_by_hash,
+    record_run_finish,
+    record_run_start,
     set_source_cursor,
-    DEFAULT_DB_PATH
 )
-from radar.profile import load_profile
-from radar.normalize import compute_dedupe_hash, normalize_location, infer_seniority
 from radar.filter import apply_filters
 from radar.link_checker import check_apply_link
+from radar.normalize import compute_dedupe_hash, infer_seniority, normalize_location
+from radar.notifier import notify
+from radar.profile import load_profile
 from radar.research import CompanyResearcher
 from radar.score import FitScorer
-from radar.notifier import notify
 from radar.sources import (
     ATSSource,
     HackerNewsHiringSource,
     TavilySearchSource,
-    YCStartupSource
+    YCStartupSource,
 )
+
+load_dotenv()
 
 LOCK_FILE = Path("job_radar.lock")
 
@@ -70,7 +69,7 @@ def release_lock():
         pass
 
 
-def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
+def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -79,9 +78,9 @@ def execute_pipeline(
     config_path: str = "config.yaml",
     profile_path: str = "profile.json",
     dry_run: bool = False,
-    single_source: Optional[str] = None,
-    limit: Optional[int] = None
-) -> Dict[str, Any]:
+    single_source: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
     """Runs the complete discovery, filtering, research, and scoring pipeline."""
     config = load_config(config_path)
     profile = load_profile(profile_path)
@@ -111,7 +110,7 @@ def execute_pipeline(
     scorer = FitScorer()
 
     new_openings_count = 0
-    errors: List[str] = []
+    errors: list[str] = []
     top_matches_found = []
 
     for source in sources_to_run:
@@ -121,7 +120,7 @@ def execute_pipeline(
             raw_openings, new_cursor = source.discover(cursor=cursor)
             if new_cursor and not dry_run:
                 set_source_cursor(source.name, new_cursor)
-            
+
             print(f"Source '{source.name}' returned {len(raw_openings)} raw items.")
         except Exception as e:
             err_msg = f"Error querying source {source.name}: {e}"
@@ -164,7 +163,7 @@ def execute_pipeline(
                 "remote": item.remote,
                 "apply_url": item.apply_url,
                 "description": item.description,
-                "seniority": inferred_sen
+                "seniority": inferred_sen,
             }
             score_res = scorer.score_fit(profile, config, opening_dict, company_info)
 
@@ -187,7 +186,7 @@ def execute_pipeline(
                 source=item.source,
                 posted_at=item.posted_at,
                 dedupe_hash=dedupe_hash,
-                status_head_ok=link_healthy
+                status_head_ok=link_healthy,
             )
 
             insert_match(
@@ -195,7 +194,7 @@ def execute_pipeline(
                 score=score_res.score,
                 reason=score_res.reason,
                 sources=score_res.sources,
-                status="new"
+                status="new",
             )
 
             new_openings_count += 1
@@ -210,14 +209,10 @@ def execute_pipeline(
         best = top_matches_found[0]
         notify(
             title=f"Job Radar: {len(top_matches_found)} High-Fit Matches!",
-            message=f"Top match: {best[0]} - {best[1]} (Score: {best[2]}/100)"
+            message=f"Top match: {best[0]} - {best[1]} (Score: {best[2]}/100)",
         )
 
-    return {
-        "run_id": run_id,
-        "new_openings": new_openings_count,
-        "errors": errors
-    }
+    return {"run_id": run_id, "new_openings": new_openings_count, "errors": errors}
 
 
 def main():
@@ -239,7 +234,7 @@ def main():
             profile_path=args.profile,
             dry_run=args.dry_run,
             single_source=args.source,
-            limit=args.limit
+            limit=args.limit,
         )
     finally:
         release_lock()

@@ -1,10 +1,11 @@
 """Filter engine to drop dealbreakers, avoided companies, and mismatched roles."""
 
 import re
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-from radar.sources.base import RawOpening
+from typing import Any
+
 from radar.normalize import clean_company_domain, infer_seniority
+from radar.sources.base import RawOpening
 
 
 @dataclass
@@ -13,35 +14,74 @@ class FilterResult:
     reason: str
 
 
-def is_on_site_outside_india(location: Optional[str], remote: bool) -> bool:
+def is_on_site_outside_india(location: str | None, remote: bool) -> bool:
     """Returns True if role is confirmed on-site outside India."""
     if remote or not location:
         return False
     loc = location.lower()
     # Check if India
-    if any(k in loc for k in ["india", "bengaluru", "bangalore", "delhi", "hyderabad", "mumbai", "pune", "noida", "gurgaon"]):
+    if any(
+        k in loc
+        for k in [
+            "india",
+            "bengaluru",
+            "bangalore",
+            "delhi",
+            "hyderabad",
+            "mumbai",
+            "pune",
+            "noida",
+            "gurgaon",
+        ]
+    ):
         return False
     if "remote" in loc:
         return False
-    
+
     # Locations known to be outside India
     foreign_keywords = [
-        "usa", "united states", "san francisco", "new york", "london", "uk", 
-        "germany", "berlin", "canada", "toronto", "singapore", "australia", 
-        "sydney", "paris", "france", "austin", "seattle"
+        "usa",
+        "united states",
+        "san francisco",
+        "new york",
+        "london",
+        "uk",
+        "germany",
+        "berlin",
+        "canada",
+        "toronto",
+        "singapore",
+        "australia",
+        "sydney",
+        "paris",
+        "france",
+        "austin",
+        "seattle",
     ]
     return any(k in loc for k in foreign_keywords)
 
 
-def matches_target_roles(title: str, target_roles: List[str]) -> bool:
+def matches_target_roles(title: str, target_roles: list[str]) -> bool:
     """Check if title matches any of the target roles, or if it's an excluded role."""
     title_lower = title.lower()
 
     # Immediate rejection for non-engineering / unrelated fields
     disallowed = [
-        "account executive", "sales", "recruiter", "marketing", "hr ", "human resources", 
-        "legal", "counsel", "finance", "accounting", "growth manager", "customer success",
-        "graphic designer", "copywriter", "office manager"
+        "account executive",
+        "sales",
+        "recruiter",
+        "marketing",
+        "hr ",
+        "human resources",
+        "legal",
+        "counsel",
+        "finance",
+        "accounting",
+        "growth manager",
+        "customer success",
+        "graphic designer",
+        "copywriter",
+        "office manager",
     ]
     for d in disallowed:
         if d in title_lower:
@@ -49,9 +89,23 @@ def matches_target_roles(title: str, target_roles: List[str]) -> bool:
 
     # Check engineering / technical keywords
     tech_keywords = [
-        "engineer", "developer", "ai", "ml", "machine learning", "deep learning", 
-        "data science", "backend", "frontend", "full stack", "fullstack", "software",
-        "intern", "researcher", "nlp", "llm", "systems"
+        "engineer",
+        "developer",
+        "ai",
+        "ml",
+        "machine learning",
+        "deep learning",
+        "data science",
+        "backend",
+        "frontend",
+        "full stack",
+        "fullstack",
+        "software",
+        "intern",
+        "researcher",
+        "nlp",
+        "llm",
+        "systems",
     ]
     if not any(k in title_lower for k in tech_keywords):
         return False
@@ -59,7 +113,7 @@ def matches_target_roles(title: str, target_roles: List[str]) -> bool:
     # Check against specific target roles if provided
     if not target_roles:
         return True
-    
+
     for r in target_roles:
         r_terms = r.lower().split()
         if all(term in title_lower for term in r_terms):
@@ -68,7 +122,7 @@ def matches_target_roles(title: str, target_roles: List[str]) -> bool:
     return True
 
 
-def apply_filters(opening: RawOpening, config: Dict[str, Any]) -> FilterResult:
+def apply_filters(opening: RawOpening, config: dict[str, Any]) -> FilterResult:
     """
     Applies cheap rule-based filters first, verifying dealbreakers, avoided companies,
     seniority, and role alignment.

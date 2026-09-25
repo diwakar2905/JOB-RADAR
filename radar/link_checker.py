@@ -1,10 +1,9 @@
 """Link validator checking apply URLs with HTTP HEAD/GET requests."""
 
 import httpx
-from typing import Optional
 
 
-def check_apply_link(url: Optional[str], timeout: float = 6.0) -> bool:
+def check_apply_link(url: str | None, timeout: float = 6.0) -> bool:
     """
     Verifies that the apply URL is reachable and does not return 404 or 410.
     Returns True if healthy, False if broken or unreachable.
@@ -14,7 +13,7 @@ def check_apply_link(url: Optional[str], timeout: float = 6.0) -> bool:
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "*/*"
+        "Accept": "*/*",
     }
 
     try:
@@ -23,7 +22,7 @@ def check_apply_link(url: Optional[str], timeout: float = 6.0) -> bool:
                 res = client.head(url)
                 if res.status_code in (200, 201, 204, 301, 302, 307, 308):
                     return True
-                if res.status_code == 405: # Method Not Allowed for HEAD, try streaming GET
+                if res.status_code == 405:  # Method Not Allowed for HEAD, try streaming GET
                     with client.stream("GET", url) as stream_res:
                         return stream_res.status_code < 400
                 return res.status_code < 400

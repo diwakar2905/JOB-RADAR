@@ -1,9 +1,8 @@
 """Unified LLM interface supporting Claude (Anthropic), Ollama (Local), and Heuristic Fallbacks."""
 
 import os
-import json
+
 import httpx
-from typing import Dict, Any, Optional, Tuple
 
 
 class LLMClient:
@@ -11,10 +10,11 @@ class LLMClient:
 
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
         self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
 
-    def call_ollama(self, prompt: str, system: Optional[str] = None) -> Optional[str]:
+    def call_ollama(self, prompt: str, system: str | None = None) -> str | None:
         """Make call to local Ollama instance if available."""
         try:
             url = f"{self.ollama_host}/api/generate"
@@ -23,7 +23,7 @@ class LLMClient:
                 "prompt": prompt,
                 "system": system or "",
                 "stream": False,
-                "format": "json"
+                "format": "json",
             }
             with httpx.Client(timeout=30.0) as client:
                 res = client.post(url, json=payload)
@@ -34,22 +34,22 @@ class LLMClient:
             return None
         return None
 
-    def call_claude(self, prompt: str, system: Optional[str] = None) -> Optional[str]:
+    def call_claude(self, prompt: str, system: str | None = None) -> str | None:
         """Make call to Anthropic Claude API."""
         if not self.anthropic_key:
             return None
-        
+
         try:
             url = "https://api.anthropic.com/v1/messages"
             headers = {
                 "x-api-key": self.anthropic_key,
                 "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
+                "content-type": "application/json",
             }
             payload = {
-                "model": "claude-3-5-sonnet-20241022",
+                "model": self.anthropic_model,
                 "max_tokens": 1000,
-                "messages": [{"role": "user", "content": prompt}]
+                "messages": [{"role": "user", "content": prompt}],
             }
             if system:
                 payload["system"] = system
@@ -65,7 +65,7 @@ class LLMClient:
             return None
         return None
 
-    def complete(self, prompt: str, system: Optional[str] = None, prefer_quality: bool = True) -> Tuple[Optional[str], str]:
+    def complete(self, prompt: str, system: str | None = None, prefer_quality: bool = True) -> tuple[str | None, str]:
         """
         Attempts execution using quality LLM (Claude) if prefer_quality is True,
         falling back to Ollama. Returns (response_text, provider_name).

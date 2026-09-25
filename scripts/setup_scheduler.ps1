@@ -1,17 +1,29 @@
-# PowerShell script to register Job Radar in Windows Task Scheduler
-# Run this once in PowerShell: powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1
+# PowerShell script to register (or remove with -Uninstall) Job Radar in
+# Windows Task Scheduler.
+# Install:   powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1
+# Uninstall: powershell -ExecutionPolicy Bypass -File scripts\setup_scheduler.ps1 -Uninstall
+
+param(
+    [switch]$Uninstall
+)
 
 $TaskName = "JobRadar_Pipeline"
-$PythonPath = (Get-Command python).Source
 $ScriptDir = Split-Path -Parent $PSScriptRoot
-$RunScript = Join-Path $ScriptDir "run.py"
+
+if ($Uninstall) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "[SUCCESS] Job Radar scheduled task '$TaskName' removed." -ForegroundColor Green
+    exit 0
+}
+
+$PythonPath = (Get-Command python).Source
 
 Write-Host "Configuring Job Radar Scheduler..." -ForegroundColor Cyan
 Write-Host "Python Path: $PythonPath"
-Write-Host "Target Script: $RunScript"
+Write-Host "Working directory: $ScriptDir"
 
-# Action to execute
-$Action = New-ScheduledTaskAction -Execute $PythonPath -Argument "`"$RunScript`"" -WorkingDirectory $ScriptDir
+# Action to execute: python -m radar run
+$Action = New-ScheduledTaskAction -Execute $PythonPath -Argument "-m radar run" -WorkingDirectory $ScriptDir
 
 # Trigger: Every 6 hours starting today
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 6)
