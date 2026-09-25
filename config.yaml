@@ -26,6 +26,8 @@ targets:
     - series-a
     - series-b
     - series-c
+  max_years_experience: 2   # roles asking for more than this are filtered out; null = no cap
+  remote_ok: true
 
 priorities:
   - learning

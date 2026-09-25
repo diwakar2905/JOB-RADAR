@@ -46,13 +46,20 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configure Your Profile & Targeting
+
+**Easiest: use the dashboard's Setup tab.** Run `streamlit run app.py`, open the **⚙️ Setup** tab, upload
+your resume once, list the roles you're targeting (as many as you want, searched together), your
+experience level, max years of experience a posting can ask for, locations, and dealbreakers — then hit
+**Save & Build Profile**. No YAML or CLI needed.
+
+Or do it by hand:
 - **`profile.json`**: Never committed (personal data). Copy the starter template and edit it, or let
   the CLI build one for you:
   ```bash
   cp profile.example.json profile.json   # then edit by hand, or:
   python -m radar profile --resume data/resume.pdf --github diwakarmishra
   ```
-- **`config.yaml`**: Set target roles, locations (`India`, `remote`), seniority (`intern`, `fresher`, `junior`), company watchlist, and dealbreakers.
+- **`config.yaml`**: Set target roles, locations (`India`, `remote`), seniority (`intern`, `fresher`, `junior`), `max_years_experience`, company watchlist, and dealbreakers.
 - **`.env`**: Add your optional API keys (`ANTHROPIC_API_KEY`, `TAVILY_API_KEY`, `OLLAMA_HOST`). Job Radar includes a fallback scoring engine that works even without paid API keys!
 
 ### 3. Run the Discovery Pipeline

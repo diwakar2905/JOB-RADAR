@@ -161,12 +161,15 @@ def apply_filters(opening: RawOpening, config: dict[str, Any]) -> FilterResult:
         if is_on_site_outside_india(opening.location, opening.remote):
             return FilterResult(passed=False, reason=f"Role location ({opening.location}) is on-site outside India")
 
-    # 6. Experience requirement dealbreaker (e.g. 5+ years)
-    if any("5+ years" in d for d in dealbreakers) or any("senior only" in d for d in dealbreakers):
+    # 6. Experience requirement: numeric threshold from targets.max_years_experience,
+    # falling back to the legacy "senior only" / "5+ years" dealbreaker phrases.
+    max_years = targets.get("max_years_experience")
+    if max_years is None and (any("5+ years" in d for d in dealbreakers) or any("senior only" in d for d in dealbreakers)):
+        max_years = 4
+    if max_years is not None:
         exp_match = re.search(r"(\d+)\+?\s*years?\s+(?:of\s+)?experience", combined_text)
-        if exp_match:
+        if exp_match and int(exp_match.group(1)) > max_years:
             years = int(exp_match.group(1))
-            if years >= 5 and "senior" not in allowed_seniority:
-                return FilterResult(passed=False, reason=f"Role demands {years}+ years experience")
+            return FilterResult(passed=False, reason=f"Role demands {years}+ years experience (target max: {max_years})")
 
     return FilterResult(passed=True, reason="Passed all filters")

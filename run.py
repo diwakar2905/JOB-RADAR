@@ -74,6 +74,11 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def save_config(config: dict[str, Any], config_path: str = "config.yaml") -> None:
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+
+
 def execute_pipeline(
     config_path: str = "config.yaml",
     profile_path: str = "profile.json",

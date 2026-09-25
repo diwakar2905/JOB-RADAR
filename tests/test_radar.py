@@ -155,6 +155,41 @@ def test_filter_dealbreakers():
     assert res.passed
 
 
+def test_filter_max_years_experience_threshold():
+    config = {
+        "targets": {
+            "roles": ["backend engineer"],
+            "seniority": ["intern", "fresher", "junior"],
+            "max_years_experience": 2,
+        },
+        "dealbreakers": [],
+        "avoid_companies": [],
+    }
+
+    op_too_senior = RawOpening(
+        company_name="BigCo",
+        company_domain="bigco.com",
+        title="Backend Engineer",
+        apply_url="https://bigco.com/apply",
+        source="test",
+        description="Candidates should have 4 years of experience with distributed systems.",
+    )
+    res = apply_filters(op_too_senior, config)
+    assert not res.passed
+    assert "experience" in res.reason.lower()
+
+    op_within_range = RawOpening(
+        company_name="SmallCo",
+        company_domain="smallco.com",
+        title="Backend Engineer",
+        apply_url="https://smallco.com/apply",
+        source="test",
+        description="1-2 years of experience preferred.",
+    )
+    res = apply_filters(op_within_range, config)
+    assert res.passed
+
+
 def test_heuristic_scoring():
     profile = {
         "name": "Diwakar Mishra",
