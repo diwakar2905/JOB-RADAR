@@ -1,0 +1,70 @@
+targets:
+  roles:
+    - AI engineer
+    - Machine Learning engineer
+    - backend engineer
+    - full-stack engineer
+    - software engineer
+  seniority:
+    - intern
+    - fresher
+    - junior
+    - early-career
+    - new grad
+  locations:
+    - India
+    - remote
+    - Bengaluru
+    - Bangalore
+    - Delhi
+    - Hyderabad
+    - Mumbai
+    - Pune
+  stages:
+    - pre-seed
+    - seed
+    - series-a
+    - series-b
+    - series-c
+
+priorities:
+  - learning
+  - equity
+  - stack-match
+
+dealbreakers:
+  - unpaid
+  - on-site outside India
+  - 5+ years experience
+  - senior only
+  - staff only
+  - principal only
+
+avoid_companies:
+  - Revature
+  - Infosys
+  - Wipro
+  - TCS
+
+watchlist_ats:
+  greenhouse:
+    - postman
+    - browserstack
+    - perplexity
+    - mistral
+    - replicate
+    - together
+  lever:
+    - hasura
+  ashby:
+    - cursor
+    - modal
+    - elevenlabs
+    - ramp
+    - retain
+
+schedule_hours: 6
+max_new_matches_per_run: 50
+monthly_spend_cap_cents: 500  # $5 cap for API queries per month
+hide_older_than_days: 30
+min_fit_score_alert: 80

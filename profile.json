@@ -1,0 +1,77 @@
+{
+  "name": "Diwakar Mishra",
+  "headline": "CSE (AIML) Student & Autonomous Systems / AI Engineer",
+  "location": "India",
+  "contact": {
+    "email": "diwakar@example.com",
+    "github": "https://github.com/diwakarmishra",
+    "linkedin": "https://linkedin.com/in/diwakarmishra",
+    "portfolio": "https://diwakarmishra.dev"
+  },
+  "roles_sought": [
+    "AI Engineer",
+    "Machine Learning Engineer",
+    "Backend Engineer",
+    "Full-Stack Engineer",
+    "Software Engineer (Early Career / Intern)"
+  ],
+  "seniority": [
+    "intern",
+    "fresher",
+    "junior"
+  ],
+  "skills": [
+    "Python",
+    "PyTorch",
+    "FastAPI",
+    "Large Language Models (LLMs)",
+    "RAG & Agentic Workflows",
+    "LangChain / LlamaIndex",
+    "Hugging Face Transformers",
+    "PostgreSQL",
+    "SQLite",
+    "Docker",
+    "TypeScript",
+    "React / Next.js",
+    "Git / GitHub Actions",
+    "REST & GraphQL APIs"
+  ],
+  "stack": [
+    "Python 3.11+",
+    "PyTorch",
+    "FastAPI",
+    "Streamlit",
+    "PostgreSQL",
+    "Docker",
+    "Next.js"
+  ],
+  "best_projects": [
+    {
+      "name": "Job Radar",
+      "description": "Personal autonomous job discovery and ranking agent running locally with SQLite, public ATS integration, and LLM-assisted fit scoring.",
+      "stack": ["Python", "SQLite", "Streamlit", "Claude API", "Ollama"],
+      "proof_point": "Engineered autonomous pipeline processing ATS feeds with deduplication hashing and citation-grounded scoring."
+    },
+    {
+      "name": "Agentic RAG Assistant",
+      "description": "Multi-agent research and retrieval engine with vector embeddings, semantic reranking, and tool-augmented answer generation.",
+      "stack": ["Python", "PyTorch", "FastAPI", "FAISS", "Hugging Face"],
+      "proof_point": "Built end-to-end evaluation suite demonstrating 35% improvement in context retrieval precision."
+    },
+    {
+      "name": "Distributed Microservices Task Pipeline",
+      "description": "Scalable event-driven backend service processing async tasks with Redis queue and PostgreSQL.",
+      "stack": ["Python", "FastAPI", "Redis", "PostgreSQL", "Docker"],
+      "proof_point": "Handled 10k+ concurrent requests in stress tests with zero data drop."
+    }
+  ],
+  "proof_points": [
+    "B.Tech in Computer Science and Engineering (Artificial Intelligence & Machine Learning).",
+    "Active builder with multiple deployed full-stack and AI pipeline projects.",
+    "Strong foundation in data structures, algorithms, agentic AI architectures, and backend systems."
+  ],
+  "education": {
+    "degree": "B.Tech in Computer Science and Engineering (AI & ML)",
+    "status": "Final / Pre-final Year Student"
+  }
+}
