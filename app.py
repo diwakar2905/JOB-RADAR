@@ -1,5 +1,6 @@
 """Job Radar - Local Streamlit Review Queue and Application Dashboard."""
 
+import html
 from pathlib import Path
 
 import streamlit as st
@@ -242,10 +243,6 @@ with tab_setup:
         st.success("Saved! Click '⚡ Run Discovery Pipeline Now' in the sidebar to search with your new settings.")
         st.rerun()
 
-current_tab = "new"
-if tab_saved._is_selected if hasattr(tab_saved, "_is_selected") else False:
-    current_tab = "saved"
-
 # Filters bar
 f_col1, f_col2, f_col3 = st.columns([2, 1, 1])
 with f_col1:
@@ -282,6 +279,14 @@ def render_matches_list(status_filter: str):
         score_class = "score-badge-high" if score >= 80 else ("score-badge-med" if score >= 60 else "score-badge-low")
         link_healthy = m.get("status_head_ok", 1) == 1
 
+        # Job titles, company names, locations and reasons come from external sources
+        # (job boards, HN comments, search results) — escape before injecting as HTML.
+        safe_source = html.escape(str(m["source"]))
+        safe_title = html.escape(str(m["title"]))
+        safe_company = html.escape(str(m["company_name"]))
+        safe_location = html.escape(str(m["opening_location"] or ""))
+        safe_reason = html.escape(str(m["reason"]))
+
         with st.container():
             st.markdown(
                 f"""
@@ -289,16 +294,16 @@ def render_matches_list(status_filter: str):
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <div>
                         <span class="{score_class}">Fit Score: {score}/100</span>
-                        <span class="source-tag" style="margin-left: 8px;">{m["source"]}</span>
+                        <span class="source-tag" style="margin-left: 8px;">{safe_source}</span>
                         {"" if link_healthy else '<span class="link-warning" style="margin-left: 8px;">⚠️ Verify Apply Link</span>'}
-                        <h3 style="margin-top: 8px; margin-bottom: 4px;">{m["title"]}</h3>
+                        <h3 style="margin-top: 8px; margin-bottom: 4px;">{safe_title}</h3>
                         <div style="font-size: 1.05rem; font-weight: 600; color: #334155;">
-                            {m["company_name"]} · <span style="font-weight: 400; color: #64748B;">{m["opening_location"]} {(" (Remote)" if m["remote"] else "")}</span>
+                            {safe_company} · <span style="font-weight: 400; color: #64748B;">{safe_location} {(" (Remote)" if m["remote"] else "")}</span>
                         </div>
                     </div>
                 </div>
                 <div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px;">
-                    <strong>Why it fits:</strong> {m["reason"]}
+                    <strong>Why it fits:</strong> {safe_reason}
                 </div>
             </div>
             """,

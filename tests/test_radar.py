@@ -18,16 +18,18 @@ from radar.db import (
     update_match_feedback,
     update_match_status,
 )
-from radar.filter import apply_filters
+from radar.filter import apply_filters, matches_target_roles
 from radar.normalize import (
     compute_dedupe_hash,
     infer_seniority,
     normalize_location,
     normalize_title,
 )
+from radar.notifier import _sanitize
 from radar.score import FitScorer, compute_heuristic_score
 from radar.sources.ats import ATSSource
 from radar.sources.base import RawOpening
+from radar.sources.yc import YCStartupSource
 
 
 @pytest.fixture
@@ -402,3 +404,97 @@ def test_score_fit_includes_calibration_once_enough_feedback(test_db):
     assert "Role 4" in block
     # Cached for subsequent calls within the same scorer/run.
     assert fresh_scorer._get_calibration_block(db_path=test_db) is block
+
+
+def test_matches_target_roles_rejects_non_target_role():
+    # Regression: matches_target_roles previously fell through to `return True`
+    # unconditionally, making targets.roles a no-op filter.
+    target_roles = ["AI engineer", "backend engineer"]
+    assert matches_target_roles("AI Engineer Intern", target_roles) is True
+    assert matches_target_roles("Backend Engineer", target_roles) is True
+    assert matches_target_roles("Site Reliability Engineer", target_roles) is False
+    assert matches_target_roles("Growth Engineering Manager", target_roles) is False
+
+
+def test_dry_run_does_not_write_db_or_spend_budget(tmp_path, monkeypatch):
+    # Regression: --dry-run must never write to the DB or call paid research/scoring.
+    import run as run_module
+    from radar.db import get_connection
+    from radar.sources.base import RawOpening
+
+    monkeypatch.chdir(tmp_path)
+
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(
+        "targets:\n  roles: [backend engineer]\n  seniority: [intern, fresher, junior]\n"
+        "dealbreakers: []\navoid_companies: []\nwatchlist_ats: {}\n"
+    )
+    profile_json = tmp_path / "profile.json"
+    profile_json.write_text('{"name": "Test", "roles_sought": ["backend engineer"], "skills": ["python"]}')
+
+    class FakeATSSource:
+        name = "ats"
+
+        def __init__(self, watchlist_config=None):
+            pass
+
+        def discover(self, cursor=None):
+            return (
+                [
+                    RawOpening(
+                        company_name="Acme",
+                        company_domain="acme.com",
+                        title="Backend Engineer",
+                        apply_url="https://acme.com/apply",
+                        source="ats",
+                        location="Remote",
+                        remote=True,
+                    )
+                ],
+                None,
+            )
+
+    def research_should_not_be_called(*args, **kwargs):
+        raise AssertionError("dry-run must not call company research")
+
+    def score_should_not_be_called(*args, **kwargs):
+        raise AssertionError("dry-run must not call paid scoring")
+
+    monkeypatch.setattr(run_module, "ATSSource", FakeATSSource)
+    monkeypatch.setattr(run_module.CompanyResearcher, "research_company", research_should_not_be_called)
+    monkeypatch.setattr(run_module.FitScorer, "score_fit", score_should_not_be_called)
+    monkeypatch.setattr(run_module, "check_apply_link", lambda url: True)
+
+    result = run_module.execute_pipeline(
+        config_path=str(config_yaml),
+        profile_path=str(profile_json),
+        dry_run=True,
+        single_source="ats",
+    )
+
+    assert result["new_openings"] == 1
+    # DB file should exist (schema init) but contain no companies/openings/matches.
+    conn = get_connection(tmp_path / "db.sqlite")
+    assert conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM openings").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM api_usage").fetchone()[0] == 0
+    conn.close()
+
+
+def test_notifier_sanitize_strips_injection_characters():
+    dirty = 'Acme"); Remove-Item C:\\ -Recurse `$env:evil'
+    clean = _sanitize(dirty)
+    assert '"' not in clean
+    assert "`" not in clean
+    assert "$" not in clean
+    assert "'" not in clean
+
+
+def test_yc_source_never_crawls_directly():
+    # Hard rule: YC/Wellfound must only ever be reached through Tavily search
+    # results, never crawled directly.
+    source = YCStartupSource()
+    openings, cursor = source.discover(cursor="anything")
+    assert openings == []
+    assert cursor == "anything"
