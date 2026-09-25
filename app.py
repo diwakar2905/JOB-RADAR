@@ -6,7 +6,10 @@ from pathlib import Path
 import streamlit as st
 
 from radar.db import (
+    get_companies_overview,
+    get_distinct_company_stages,
     get_matches_for_dashboard,
+    get_openings_for_company,
     get_pipeline_stats,
     init_db,
     update_match_feedback,
@@ -145,13 +148,14 @@ st.markdown(
 )
 
 # Tabs for Application Status
-tab_setup, tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs(
+tab_setup, tab_new, tab_saved, tab_applied, tab_interviewing, tab_companies, tab_archive = st.tabs(
     [
         "⚙️ Setup",
         f"📥 New Queue ({stats['new_matches']})",
         f"⭐ Saved ({stats['saved']})",
         f"🚀 Applied ({stats['applied']})",
         f"🎯 Interviewing ({stats['interviewing']})",
+        "🏢 Companies",
         "🗄️ All / Archive",
     ]
 )
@@ -398,6 +402,58 @@ with tab_applied:
 
 with tab_interviewing:
     render_matches_list("interviewing")
+
+with tab_companies:
+    st.subheader("Companies")
+    st.caption("Every company Job Radar has researched, filterable by stage.")
+
+    stages = get_distinct_company_stages()
+    stage_filter = st.selectbox("Filter by stage", options=["all", *stages], index=0)
+
+    companies = get_companies_overview(stage=stage_filter)
+
+    if not companies:
+        st.info("No companies researched yet. Run the discovery pipeline to populate this page.")
+    else:
+        st.caption(f"Showing {len(companies)} compan{'y' if len(companies) == 1 else 'ies'}.")
+
+        for c in companies:
+            safe_name = html.escape(str(c["name"]))
+            safe_stage = html.escape(str(c.get("stage") or "Unknown stage"))
+            safe_location = html.escape(str(c.get("location") or ""))
+            safe_summary = html.escape(str(c.get("summary") or "No summary available yet."))
+            safe_funding = html.escape(str(c.get("funding") or "Undisclosed"))
+            safe_founders = html.escape(str(c.get("founders") or "Undisclosed"))
+
+            with st.container():
+                header = f"**{safe_name}** · {safe_stage}"
+                if safe_location:
+                    header += f" · {safe_location}"
+                if c.get("best_score") is not None:
+                    header += f" — best fit {c['best_score']}/100"
+                st.markdown(header)
+                st.caption(f"{c['opening_count']} opening(s) tracked, {c['match_count']} scored")
+                st.write(safe_summary)
+
+                with st.expander(f"Details & openings — {safe_name}"):
+                    col1, col2 = st.columns(2)
+                    col1.write(f"**Funding:** {safe_funding}")
+                    col2.write(f"**Founders:** {safe_founders}")
+
+                    if c.get("sources"):
+                        st.write("**Sources:**")
+                        for s in c["sources"]:
+                            st.markdown(f"- [{s}]({s})")
+
+                    openings = get_openings_for_company(c["id"])
+                    if openings:
+                        st.write("**Openings:**")
+                        for o in openings:
+                            safe_title = html.escape(str(o["title"]))
+                            score_txt = f"{o['score']}/100" if o.get("score") is not None else "unscored"
+                            st.markdown(f"- [{safe_title}]({o['apply_url']}) — {score_txt} ({o.get('match_status') or 'new'})")
+
+                st.divider()
 
 with tab_archive:
     render_matches_list("all")

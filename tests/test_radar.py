@@ -6,15 +6,19 @@ from httpx import Response
 
 from radar.db import (
     count_feedback_entries,
+    get_companies_overview,
     get_discovered_ats_boards,
+    get_distinct_company_stages,
     get_feedback_examples,
     get_matches_for_dashboard,
+    get_openings_for_company,
     get_or_create_company,
     init_db,
     insert_match,
     insert_opening,
     opening_exists_by_hash,
     record_discovered_ats_board,
+    update_company_research,
     update_match_feedback,
     update_match_status,
 )
@@ -535,3 +539,76 @@ def test_heuristic_score_reason_requires_full_role_phrase_match():
         apply_url="https://goodai.com/apply",
     )
     assert "Direct match with target role 'ai engineer'" in matching.reason
+
+
+def test_companies_overview_and_stage_filter(test_db):
+    acme_id = get_or_create_company("Acme", "acme.com", db_path=test_db)
+    update_company_research(
+        acme_id,
+        stage="Seed",
+        funding="$2M",
+        founders="Jane Doe",
+        summary="Acme builds widgets.",
+        sources=["https://acme.com"],
+        db_path=test_db,
+    )
+    acme_opening = insert_opening(
+        company_id=acme_id,
+        title="Backend Engineer",
+        seniority="junior",
+        location="Remote",
+        remote=True,
+        apply_url="https://acme.com/apply",
+        source="ats",
+        dedupe_hash="companies-hash-1",
+        db_path=test_db,
+    )
+    insert_match(
+        opening_id=acme_opening,
+        score=85,
+        reason="great fit",
+        sources=["https://acme.com/apply"],
+        db_path=test_db,
+    )
+
+    beta_id = get_or_create_company("Beta", "beta.com", db_path=test_db)
+    update_company_research(
+        beta_id,
+        stage="Series A",
+        funding="$10M",
+        founders="John Smith",
+        summary="Beta builds gadgets.",
+        sources=["https://beta.com"],
+        db_path=test_db,
+    )
+    insert_opening(
+        company_id=beta_id,
+        title="AI Engineer",
+        seniority="intern",
+        location="India",
+        remote=False,
+        apply_url="https://beta.com/apply",
+        source="ats",
+        dedupe_hash="companies-hash-2",
+        db_path=test_db,
+    )
+
+    assert set(get_distinct_company_stages(db_path=test_db)) == {"Seed", "Series A"}
+
+    overview = get_companies_overview(db_path=test_db)
+    assert len(overview) == 2
+    # Sorted by best_score desc: Acme (scored 85) before Beta (unscored).
+    assert overview[0]["name"] == "Acme"
+    assert overview[0]["opening_count"] == 1
+    assert overview[0]["match_count"] == 1
+    assert overview[0]["best_score"] == 85
+    assert overview[1]["name"] == "Beta"
+    assert overview[1]["best_score"] is None
+
+    seed_only = get_companies_overview(stage="Seed", db_path=test_db)
+    assert [c["name"] for c in seed_only] == ["Acme"]
+
+    beta_openings = get_openings_for_company(beta_id, db_path=test_db)
+    assert len(beta_openings) == 1
+    assert beta_openings[0]["title"] == "AI Engineer"
+    assert beta_openings[0]["score"] is None

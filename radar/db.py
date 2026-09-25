@@ -172,6 +172,63 @@ def get_company_by_domain(domain: str, db_path: Path = DEFAULT_DB_PATH) -> dict[
         return res
 
 
+def get_companies_overview(stage: str | None = None, db_path: Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
+    """Researched companies with their opening/match counts, for the Companies page."""
+    query = """
+    SELECT
+        c.id, c.name, c.domain, c.stage, c.funding, c.location, c.founders,
+        c.summary, c.sources, c.researched_at,
+        COUNT(DISTINCT o.id) AS opening_count,
+        COUNT(DISTINCT m.id) AS match_count,
+        MAX(m.score) AS best_score
+    FROM companies c
+    LEFT JOIN openings o ON o.company_id = c.id
+    LEFT JOIN matches m ON m.opening_id = o.id
+    """
+    params: list[Any] = []
+    if stage and stage != "all":
+        query += " WHERE c.stage = ?"
+        params.append(stage)
+    query += " GROUP BY c.id ORDER BY best_score DESC, opening_count DESC, c.name ASC"
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if d.get("sources"):
+                try:
+                    d["sources"] = json.loads(d["sources"])
+                except Exception:
+                    d["sources"] = []
+            else:
+                d["sources"] = []
+            results.append(d)
+        return results
+
+
+def get_distinct_company_stages(db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT stage FROM companies WHERE stage IS NOT NULL AND stage != '' ORDER BY stage"
+        ).fetchall()
+        return [r["stage"] for r in rows]
+
+
+def get_openings_for_company(company_id: int, db_path: Path = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
+    query = """
+    SELECT o.id, o.title, o.location, o.remote, o.apply_url, o.source, o.posted_at,
+           o.status_head_ok, m.score, m.status AS match_status
+    FROM openings o
+    LEFT JOIN matches m ON m.opening_id = o.id
+    WHERE o.company_id = ?
+    ORDER BY m.score DESC NULLS LAST, o.first_seen_at DESC
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, (company_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
 def opening_exists_by_hash(dedupe_hash: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
     with get_connection(db_path) as conn:
         cur = conn.execute("SELECT 1 FROM openings WHERE dedupe_hash = ?", (dedupe_hash,))
