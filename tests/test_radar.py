@@ -498,3 +498,40 @@ def test_yc_source_never_crawls_directly():
     openings, cursor = source.discover(cursor="anything")
     assert openings == []
     assert cursor == "anything"
+
+
+def test_heuristic_score_reason_requires_full_role_phrase_match():
+    # Regression: the role-match bonus used to credit a title as matching "AI
+    # Engineer" whenever it merely contained the generic word "engineer", even
+    # with no "ai" anywhere in the title. It must now require every word in the
+    # target role phrase to appear.
+    profile = {
+        "roles_sought": ["AI Engineer", "Backend Engineer"],
+        "skills": [],
+    }
+    config = {"targets": {}}
+
+    unrelated = compute_heuristic_score(
+        profile=profile,
+        config=config,
+        opening_title="Software Engineer, Billing",
+        opening_location=None,
+        is_remote=False,
+        company_name="BigCo",
+        company_research={},
+        apply_url="https://bigco.com/apply",
+    )
+    assert "Direct match with target role 'ai engineer'" not in unrelated.reason
+    assert "Direct match with target role 'backend engineer'" not in unrelated.reason
+
+    matching = compute_heuristic_score(
+        profile=profile,
+        config=config,
+        opening_title="AI Engineer Intern",
+        opening_location=None,
+        is_remote=False,
+        company_name="GoodAI",
+        company_research={},
+        apply_url="https://goodai.com/apply",
+    )
+    assert "Direct match with target role 'ai engineer'" in matching.reason

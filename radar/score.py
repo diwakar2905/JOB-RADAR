@@ -44,10 +44,13 @@ def compute_heuristic_score(
     profile_skills = [s.lower() for s in profile.get("skills", [])]
     profile_roles = [r.lower() for r in profile.get("roles_sought", [])]
 
-    # Title match bonus
+    # Title match bonus. Requires every word in the target role phrase to appear
+    # in the title (not just any one of them, and not just the generic word
+    # "engineer"), so "Software Engineer, Billing" doesn't get credited as a
+    # match for "AI Engineer" merely because both happen to say "engineer".
     for r in profile_roles:
         terms = r.split()
-        if any(t in title_lower for t in terms if len(t) > 2):
+        if terms and all(t in title_lower for t in terms):
             score += 15
             reasons.append(f"Direct match with target role '{r}'")
             break
