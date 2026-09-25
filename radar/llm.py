@@ -13,9 +13,14 @@ class LLMClient:
         self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
         self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+        # Probed lazily on first call; cached so a down Ollama doesn't retry a
+        # slow connection for every single opening in a run.
+        self._ollama_available: bool | None = None
 
     def call_ollama(self, prompt: str, system: str | None = None) -> str | None:
         """Make call to local Ollama instance if available."""
+        if self._ollama_available is False:
+            return None
         try:
             url = f"{self.ollama_host}/api/generate"
             payload = {
@@ -25,12 +30,16 @@ class LLMClient:
                 "stream": False,
                 "format": "json",
             }
-            with httpx.Client(timeout=30.0) as client:
+            # Short connect timeout: a down Ollama should fail fast, not stall a run.
+            timeout = httpx.Timeout(connect=3.0, read=30.0, write=10.0, pool=5.0)
+            with httpx.Client(timeout=timeout) as client:
                 res = client.post(url, json=payload)
+                self._ollama_available = True
                 if res.status_code == 200:
                     data = res.json()
                     return data.get("response")
         except Exception:
+            self._ollama_available = False
             return None
         return None
 
