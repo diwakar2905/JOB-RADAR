@@ -117,6 +117,63 @@ def save_profile(data: dict[str, Any], profile_path: str = "profile.json") -> No
         json.dump(data, f, indent=2)
 
 
+COMMON_TECH_KEYWORDS = [
+    "Python",
+    "PyTorch",
+    "TensorFlow",
+    "FastAPI",
+    "Django",
+    "React",
+    "Next.js",
+    "TypeScript",
+    "Docker",
+    "Kubernetes",
+    "PostgreSQL",
+    "MongoDB",
+    "Redis",
+    "AWS",
+    "GCP",
+    "LLMs",
+    "LangChain",
+    "RAG",
+]
+
+
+def build_profile(
+    resume_path: str | None = None,
+    github: str | None = None,
+    site: str | None = None,
+    output: str = "profile.json",
+) -> dict[str, Any]:
+    """Extracts resume/GitHub/site signal into profile.json and saves it.
+
+    Shared by the CLI (`python -m radar profile`) and the dashboard's Setup tab.
+    """
+    profile = load_profile(output)
+
+    if resume_path:
+        resume_text = parse_resume_text(resume_path)
+        profile["resume_raw_summary"] = resume_text[:1000]
+        found_skills = set(profile.get("skills", []))
+        for tech in COMMON_TECH_KEYWORDS:
+            if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
+                found_skills.add(tech)
+        profile["skills"] = sorted(found_skills)
+
+    if github:
+        gh_data = fetch_github_profile(github)
+        profile["github_summary"] = gh_data
+        for r in gh_data.get("top_repositories", []):
+            if r.get("language") and r["language"] not in profile.get("skills", []):
+                profile["skills"].append(r["language"])
+
+    if site:
+        profile["portfolio_text"] = fetch_personal_site(site)
+
+    save_profile(profile, output)
+    return profile
+
+
 def main():
     parser = argparse.ArgumentParser(description="Extract and update Job Radar profile.")
     parser.add_argument("--resume", help="Path to resume PDF or TXT file")
@@ -125,53 +182,14 @@ def main():
     parser.add_argument("--output", default="profile.json", help="Path to output profile.json")
     args = parser.parse_args()
 
-    profile = load_profile(args.output)
-
     if args.resume:
         print(f"Reading resume from {args.resume}...")
-        resume_text = parse_resume_text(args.resume)
-        profile["resume_raw_summary"] = resume_text[:1000]
-        # Basic keyword heuristics
-        found_skills = set(profile.get("skills", []))
-        common_tech = [
-            "Python",
-            "PyTorch",
-            "TensorFlow",
-            "FastAPI",
-            "Django",
-            "React",
-            "Next.js",
-            "TypeScript",
-            "Docker",
-            "Kubernetes",
-            "PostgreSQL",
-            "MongoDB",
-            "Redis",
-            "AWS",
-            "GCP",
-            "LLMs",
-            "LangChain",
-            "RAG",
-        ]
-        for tech in common_tech:
-            if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
-                found_skills.add(tech)
-        profile["skills"] = sorted(list(found_skills))
-
     if args.github:
         print(f"Fetching GitHub data for {args.github}...")
-        gh_data = fetch_github_profile(args.github)
-        profile["github_summary"] = gh_data
-        for r in gh_data.get("top_repositories", []):
-            if r.get("language") and r["language"] not in profile.get("skills", []):
-                profile["skills"].append(r["language"])
-
     if args.site:
         print(f"Fetching portfolio text from {args.site}...")
-        site_text = fetch_personal_site(args.site)
-        profile["portfolio_text"] = site_text
 
-    save_profile(profile, args.output)
+    build_profile(resume_path=args.resume, github=args.github, site=args.site, output=args.output)
     print(f"Updated profile saved to {args.output}")
 
 

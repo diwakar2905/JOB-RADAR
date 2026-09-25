@@ -36,61 +36,16 @@ def main() -> None:
         sys.exit(0 if ok else 1)
 
     elif args.command == "profile":
-        import re
-
-        from radar.profile import (
-            fetch_github_profile,
-            fetch_personal_site,
-            load_profile,
-            parse_resume_text,
-            save_profile,
-        )
-
-        profile = load_profile(args.output)
+        from radar.profile import build_profile
 
         if args.resume:
             print(f"Reading resume from {args.resume}...")
-            resume_text = parse_resume_text(args.resume)
-            profile["resume_raw_summary"] = resume_text[:1000]
-            found_skills = set(profile.get("skills", []))
-            common_tech = [
-                "Python",
-                "PyTorch",
-                "TensorFlow",
-                "FastAPI",
-                "Django",
-                "React",
-                "Next.js",
-                "TypeScript",
-                "Docker",
-                "Kubernetes",
-                "PostgreSQL",
-                "MongoDB",
-                "Redis",
-                "AWS",
-                "GCP",
-                "LLMs",
-                "LangChain",
-                "RAG",
-            ]
-            for tech in common_tech:
-                if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
-                    found_skills.add(tech)
-            profile["skills"] = sorted(found_skills)
-
         if args.github:
             print(f"Fetching GitHub data for {args.github}...")
-            gh_data = fetch_github_profile(args.github)
-            profile["github_summary"] = gh_data
-            for r in gh_data.get("top_repositories", []):
-                if r.get("language") and r["language"] not in profile.get("skills", []):
-                    profile["skills"].append(r["language"])
-
         if args.site:
             print(f"Fetching portfolio text from {args.site}...")
-            profile["portfolio_text"] = fetch_personal_site(args.site)
 
-        save_profile(profile, args.output)
+        build_profile(resume_path=args.resume, github=args.github, site=args.site, output=args.output)
         print(f"Updated profile saved to {args.output}")
         print("Review it by hand before your next run.")
 

@@ -1,5 +1,7 @@
 """Job Radar - Local Streamlit Review Queue and Application Dashboard."""
 
+from pathlib import Path
+
 import streamlit as st
 
 from radar.db import (
@@ -9,8 +11,10 @@ from radar.db import (
     update_match_feedback,
     update_match_status,
 )
-from radar.profile import load_profile
-from run import execute_pipeline
+from radar.profile import build_profile, load_profile
+from run import execute_pipeline, load_config, save_config
+
+SENIORITY_OPTIONS = ["intern", "fresher", "junior", "entry-level", "new grad", "mid", "senior"]
 
 st.set_page_config(page_title="Job Radar", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
@@ -140,8 +144,9 @@ st.markdown(
 )
 
 # Tabs for Application Status
-tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs(
+tab_setup, tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs(
     [
+        "⚙️ Setup",
         f"📥 New Queue ({stats['new_matches']})",
         f"⭐ Saved ({stats['saved']})",
         f"🚀 Applied ({stats['applied']})",
@@ -149,6 +154,93 @@ tab_new, tab_saved, tab_applied, tab_interviewing, tab_archive = st.tabs(
         "🗄️ All / Archive",
     ]
 )
+
+with tab_setup:
+    st.subheader("Set up your search")
+    st.caption("Upload your resume once, tell Job Radar what you're targeting, and it handles the rest. No config files to edit.")
+
+    setup_config = load_config()
+    setup_targets = setup_config.get("targets", {})
+
+    with st.form("setup_form"):
+        st.markdown("**Resume**")
+        resume_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
+        col_a, col_b = st.columns(2)
+        with col_a:
+            github_username = st.text_input("GitHub username (optional)")
+        with col_b:
+            site_url = st.text_input("Portfolio / personal site (optional)")
+
+        st.divider()
+        st.markdown("**Roles you're targeting** — comma-separated, add as many as you like")
+        roles_text = st.text_area(
+            "Roles",
+            value=", ".join(setup_targets.get("roles", [])),
+            label_visibility="collapsed",
+            height=70,
+        )
+
+        seniority_sel = st.multiselect(
+            "Experience level",
+            options=SENIORITY_OPTIONS,
+            default=[s for s in setup_targets.get("seniority", []) if s in SENIORITY_OPTIONS],
+        )
+
+        max_years = st.number_input(
+            "Max years of experience a role can ask for (roles requiring more are auto-filtered out)",
+            min_value=0,
+            max_value=20,
+            value=int(setup_targets.get("max_years_experience") or 2),
+        )
+
+        st.markdown("**Locations** — comma-separated; include 'remote' if that's okay")
+        locations_text = st.text_area(
+            "Locations",
+            value=", ".join(setup_targets.get("locations", [])),
+            label_visibility="collapsed",
+            height=70,
+        )
+
+        st.markdown("**Dealbreakers** — comma-separated phrases to auto-reject")
+        dealbreakers_text = st.text_area(
+            "Dealbreakers",
+            value=", ".join(setup_config.get("dealbreakers", [])),
+            label_visibility="collapsed",
+            height=70,
+        )
+
+        st.markdown("**Companies to avoid** — comma-separated")
+        avoid_text = st.text_area(
+            "Avoid companies",
+            value=", ".join(setup_config.get("avoid_companies", [])),
+            label_visibility="collapsed",
+            height=50,
+        )
+
+        submitted = st.form_submit_button("💾 Save & Build Profile", type="primary", use_container_width=True)
+
+    if submitted:
+        resume_path = None
+        if resume_file is not None:
+            Path("data").mkdir(exist_ok=True)
+            resume_path = "data/resume.pdf"
+            with open(resume_path, "wb") as f:
+                f.write(resume_file.getbuffer())
+
+        with st.spinner("Building your profile from resume / GitHub / site..."):
+            build_profile(resume_path=resume_path, github=github_username or None, site=site_url or None)
+
+        setup_targets["roles"] = [r.strip() for r in roles_text.split(",") if r.strip()]
+        setup_targets["seniority"] = seniority_sel
+        setup_targets["locations"] = [loc.strip() for loc in locations_text.split(",") if loc.strip()]
+        setup_targets["max_years_experience"] = int(max_years)
+        setup_config["targets"] = setup_targets
+        setup_config["dealbreakers"] = [d.strip() for d in dealbreakers_text.split(",") if d.strip()]
+        setup_config["avoid_companies"] = [a.strip() for a in avoid_text.split(",") if a.strip()]
+        save_config(setup_config)
+
+        st.success("Saved! Click '⚡ Run Discovery Pipeline Now' in the sidebar to search with your new settings.")
+        st.rerun()
 
 current_tab = "new"
 if tab_saved._is_selected if hasattr(tab_saved, "_is_selected") else False:

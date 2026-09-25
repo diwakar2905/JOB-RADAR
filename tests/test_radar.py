@@ -5,12 +5,17 @@ import respx
 from httpx import Response
 
 from radar.db import (
+    count_feedback_entries,
+    get_discovered_ats_boards,
+    get_feedback_examples,
     get_matches_for_dashboard,
     get_or_create_company,
     init_db,
     insert_match,
     insert_opening,
     opening_exists_by_hash,
+    record_discovered_ats_board,
+    update_match_feedback,
     update_match_status,
 )
 from radar.filter import apply_filters
@@ -20,7 +25,7 @@ from radar.normalize import (
     normalize_location,
     normalize_title,
 )
-from radar.score import compute_heuristic_score
+from radar.score import FitScorer, compute_heuristic_score
 from radar.sources.ats import ATSSource
 from radar.sources.base import RawOpening
 
@@ -155,6 +160,41 @@ def test_filter_dealbreakers():
     assert res.passed
 
 
+def test_filter_max_years_experience_threshold():
+    config = {
+        "targets": {
+            "roles": ["backend engineer"],
+            "seniority": ["intern", "fresher", "junior"],
+            "max_years_experience": 2,
+        },
+        "dealbreakers": [],
+        "avoid_companies": [],
+    }
+
+    op_too_senior = RawOpening(
+        company_name="BigCo",
+        company_domain="bigco.com",
+        title="Backend Engineer",
+        apply_url="https://bigco.com/apply",
+        source="test",
+        description="Candidates should have 4 years of experience with distributed systems.",
+    )
+    res = apply_filters(op_too_senior, config)
+    assert not res.passed
+    assert "experience" in res.reason.lower()
+
+    op_within_range = RawOpening(
+        company_name="SmallCo",
+        company_domain="smallco.com",
+        title="Backend Engineer",
+        apply_url="https://smallco.com/apply",
+        source="test",
+        description="1-2 years of experience preferred.",
+    )
+    res = apply_filters(op_within_range, config)
+    assert res.passed
+
+
 def test_heuristic_scoring():
     profile = {
         "name": "Diwakar Mishra",
@@ -276,3 +316,89 @@ def test_dedupe_hash_reseen_opening_is_skipped(test_db):
     h_again = compute_dedupe_hash("hasura.io", "backend engineer", "Bengaluru")
     assert h_again == h
     assert opening_exists_by_hash(h_again, db_path=test_db)
+
+
+def test_auto_discovery_ats_boards(test_db):
+    assert get_discovered_ats_boards(db_path=test_db) == {"greenhouse": [], "lever": [], "ashby": []}
+
+    record_discovered_ats_board("greenhouse", "cursor", db_path=test_db)
+    record_discovered_ats_board("greenhouse", "cursor", db_path=test_db)  # duplicate, ignored
+    record_discovered_ats_board("ashby", "modal", db_path=test_db)
+    record_discovered_ats_board("carta", "unknown-platform", db_path=test_db)  # not an ATS we support
+
+    discovered = get_discovered_ats_boards(db_path=test_db)
+    assert discovered["greenhouse"] == ["cursor"]
+    assert discovered["ashby"] == ["modal"]
+    assert discovered["lever"] == []
+    assert "carta" not in discovered
+
+
+def test_feedback_calibration_examples(test_db):
+    company_id = get_or_create_company("Acme", "acme.com", db_path=test_db)
+    assert count_feedback_entries(db_path=test_db) == 0
+
+    for i in range(6):
+        opening_id = insert_opening(
+            company_id=company_id,
+            title=f"Role {i}",
+            seniority="junior",
+            location="Remote",
+            remote=True,
+            apply_url=f"https://acme.com/{i}",
+            source="test",
+            dedupe_hash=f"hash{i}",
+            db_path=test_db,
+        )
+        match_id = insert_match(
+            opening_id=opening_id,
+            score=70 + i,
+            reason=f"reason {i}",
+            sources=["https://acme.com"],
+            status="new",
+            db_path=test_db,
+        )
+        update_match_feedback(match_id, "good" if i % 2 == 0 else "bad", db_path=test_db)
+
+    assert count_feedback_entries(db_path=test_db) == 6
+    examples = get_feedback_examples(limit=3, db_path=test_db)
+    assert len(examples) == 3
+    assert examples[0]["title"] == "Role 5"  # most recently updated first
+    assert examples[0]["feedback"] in ("good", "bad")
+
+
+def test_score_fit_includes_calibration_once_enough_feedback(test_db):
+    scorer = FitScorer()
+
+    # Below the calibration threshold: no block yet.
+    assert scorer._get_calibration_block(db_path=test_db) == ""
+
+    company_id = get_or_create_company("Acme", "acme.com", db_path=test_db)
+    for i in range(5):
+        opening_id = insert_opening(
+            company_id=company_id,
+            title=f"Role {i}",
+            seniority="junior",
+            location="Remote",
+            remote=True,
+            apply_url=f"https://acme.com/{i}",
+            source="test",
+            dedupe_hash=f"cal-hash{i}",
+            db_path=test_db,
+        )
+        match_id = insert_match(
+            opening_id=opening_id,
+            score=70 + i,
+            reason=f"reason {i}",
+            sources=["https://acme.com"],
+            status="new",
+            db_path=test_db,
+        )
+        update_match_feedback(match_id, "good", db_path=test_db)
+
+    # A fresh scorer picks up the now-sufficient feedback.
+    fresh_scorer = FitScorer()
+    block = fresh_scorer._get_calibration_block(db_path=test_db)
+    assert "GOOD fit" in block
+    assert "Role 4" in block
+    # Cached for subsequent calls within the same scorer/run.
+    assert fresh_scorer._get_calibration_block(db_path=test_db) is block

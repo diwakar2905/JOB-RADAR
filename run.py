@@ -12,11 +12,13 @@ import yaml
 from dotenv import load_dotenv
 
 from radar.db import (
+    get_discovered_ats_boards,
     get_source_cursor,
     init_db,
     insert_match,
     insert_opening,
     opening_exists_by_hash,
+    record_discovered_ats_board,
     record_run_finish,
     record_run_start,
     set_source_cursor,
@@ -74,6 +76,11 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def save_config(config: dict[str, Any], config_path: str = "config.yaml") -> None:
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+
+
 def execute_pipeline(
     config_path: str = "config.yaml",
     profile_path: str = "profile.json",
@@ -89,9 +96,16 @@ def execute_pipeline(
     max_matches = limit or config.get("max_new_matches_per_run", 50)
     alert_threshold = config.get("min_fit_score_alert", 80)
 
-    # Initialize sources
+    # Initialize sources. Merge the static config watchlist with boards that Tavily
+    # search auto-discovered in prior runs (the "growth loop" from SPEC.md §8.4).
     sources_to_run = []
-    ats_source = ATSSource(watchlist_config=config.get("watchlist_ats"))
+    watchlist = {k: list(v) for k, v in (config.get("watchlist_ats") or {}).items()}
+    for platform, slugs in get_discovered_ats_boards().items():
+        existing = watchlist.setdefault(platform, [])
+        for slug in slugs:
+            if slug not in existing:
+                existing.append(slug)
+    ats_source = ATSSource(watchlist_config=watchlist)
     hn_source = HackerNewsHiringSource()
     tavily_source = TavilySearchSource(config=config)
     yc_source = YCStartupSource()
@@ -122,6 +136,13 @@ def execute_pipeline(
                 set_source_cursor(source.name, new_cursor)
 
             print(f"Source '{source.name}' returned {len(raw_openings)} raw items.")
+
+            if source.name == "tavily" and not dry_run:
+                for item in raw_openings:
+                    platform = item.extra.get("discovered_platform")
+                    slug = item.extra.get("discovered_slug")
+                    if platform and slug:
+                        record_discovered_ats_board(platform, slug)
         except Exception as e:
             err_msg = f"Error querying source {source.name}: {e}"
             print(err_msg)

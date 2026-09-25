@@ -66,12 +66,20 @@ class TavilySearchSource(JobSource):
                             match_gh = re.search(r"boards\.greenhouse\.io/([^/]+)", url)
                             match_lever = re.search(r"jobs\.lever\.co/([^/]+)", url)
 
+                            # Track the underlying ATS board so it can be added to the
+                            # ATS sources' watchlist for future runs (auto-discovery growth loop).
+                            discovered_platform: str | None = None
+                            discovered_slug: str | None = None
+
                             if match_ashby:
-                                company_name = match_ashby.group(1).replace("-", " ").capitalize()
+                                discovered_platform, discovered_slug = "ashby", match_ashby.group(1)
+                                company_name = discovered_slug.replace("-", " ").capitalize()
                             elif match_gh:
-                                company_name = match_gh.group(1).replace("-", " ").capitalize()
+                                discovered_platform, discovered_slug = "greenhouse", match_gh.group(1)
+                                company_name = discovered_slug.replace("-", " ").capitalize()
                             elif match_lever:
-                                company_name = match_lever.group(1).replace("-", " ").capitalize()
+                                discovered_platform, discovered_slug = "lever", match_lever.group(1)
+                                company_name = discovered_slug.replace("-", " ").capitalize()
                             elif " - " in title:
                                 company_name = title.split(" - ")[-1].strip()
 
@@ -83,6 +91,11 @@ class TavilySearchSource(JobSource):
 
                             is_remote = "remote" in snippet.lower() or "remote" in title.lower()
 
+                            extra = {"query": q}
+                            if discovered_platform and discovered_slug:
+                                extra["discovered_platform"] = discovered_platform
+                                extra["discovered_slug"] = discovered_slug
+
                             openings.append(
                                 RawOpening(
                                     company_name=company_name,
@@ -92,7 +105,7 @@ class TavilySearchSource(JobSource):
                                     source="tavily",
                                     remote=is_remote,
                                     description=snippet,
-                                    extra={"query": q},
+                                    extra=extra,
                                 )
                             )
                 except Exception:
