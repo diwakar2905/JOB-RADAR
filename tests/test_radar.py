@@ -30,7 +30,7 @@ from radar.normalize import (
     normalize_title,
 )
 from radar.notifier import _sanitize
-from radar.profile import build_profile, load_profile, save_profile
+from radar.profile import build_profile, extract_profile_with_llm, load_profile, save_profile
 from radar.score import FitScorer, compute_heuristic_score
 from radar.sources.ats import ATSSource
 from radar.sources.base import RawOpening
@@ -648,3 +648,130 @@ def test_build_profile_overwrites_roles_sought_and_seniority(tmp_path):
     build_profile(output=str(profile_path))
     unchanged = load_profile(str(profile_path))
     assert unchanged["roles_sought"] == ["backend engineer", "data engineer"]
+
+
+class _FakeLLMClient:
+    """Stands in for radar.llm.LLMClient in tests, no network involved."""
+
+    def __init__(self, response_text=None):
+        self._response_text = response_text
+
+    def complete(self, prompt, system=None, prefer_quality=True):
+        if self._response_text is None:
+            return None, "none"
+        return self._response_text, "claude"
+
+
+def test_extract_profile_with_llm_parses_valid_json(monkeypatch):
+    fake_json = (
+        '{"headline": "AI engineer who ships", '
+        '"skills": ["Rust", "gRPC"], '
+        '"best_projects": [{"name": "Radar", "one_liner": "job matcher", "stack": ["python"], "url": null}], '
+        '"proof_points": ["Built a 500-user tool solo"]}'
+    )
+    monkeypatch.setattr("radar.llm.LLMClient", lambda: _FakeLLMClient(fake_json))
+
+    result = extract_profile_with_llm("some resume text mentioning Rust and gRPC")
+    assert result is not None
+    assert result["headline"] == "AI engineer who ships"
+    assert "Rust" in result["skills"]
+    assert result["best_projects"][0]["name"] == "Radar"
+    assert result["proof_points"] == ["Built a 500-user tool solo"]
+
+
+def test_extract_profile_with_llm_returns_none_when_no_llm_available(monkeypatch):
+    monkeypatch.setattr("radar.llm.LLMClient", lambda: _FakeLLMClient(None))
+    assert extract_profile_with_llm("some resume text") is None
+
+
+def test_extract_profile_with_llm_returns_none_on_bad_json(monkeypatch):
+    monkeypatch.setattr("radar.llm.LLMClient", lambda: _FakeLLMClient("not valid json {"))
+    assert extract_profile_with_llm("some resume text") is None
+
+
+def test_build_profile_merges_llm_extraction(tmp_path, monkeypatch):
+    resume_file = tmp_path / "resume.txt"
+    resume_file.write_text("Experienced with Python and Rust. Built Radar, a job matcher.")
+
+    fake_json = (
+        '{"headline": "Backend-leaning AI builder", '
+        '"skills": ["Rust"], '
+        '"best_projects": [{"name": "Radar", "one_liner": "job matcher", "stack": ["python"], "url": null}], '
+        '"proof_points": ["Shipped to 500 users"]}'
+    )
+    monkeypatch.setattr("radar.llm.LLMClient", lambda: _FakeLLMClient(fake_json))
+
+    profile_path = tmp_path / "profile.json"
+    profile = build_profile(resume_path=str(resume_file), output=str(profile_path))
+
+    assert profile["headline"] == "Backend-leaning AI builder"
+    assert "Rust" in profile["skills"]
+    assert "Python" in profile["skills"]  # keyword-spotting still runs alongside
+    assert profile["best_projects"][0]["name"] == "Radar"
+    assert profile["proof_points"] == ["Shipped to 500 users"]
+
+
+def test_build_profile_falls_back_cleanly_when_llm_unavailable(tmp_path, monkeypatch):
+    resume_file = tmp_path / "resume.txt"
+    resume_file.write_text("Experienced with Python and FastAPI.")
+    monkeypatch.setattr("radar.llm.LLMClient", lambda: _FakeLLMClient(None))
+
+    profile_path = tmp_path / "profile.json"
+    profile = build_profile(resume_path=str(resume_file), output=str(profile_path))
+
+    # Keyword-spotting fallback still works; no crash, no LLM fields set.
+    assert "Python" in profile["skills"]
+    assert "FastAPI" in profile["skills"]
+    assert profile["best_projects"] == []
+
+
+def test_compute_heuristic_score_matches_skills_in_description_not_just_title():
+    profile = {"roles_sought": [], "skills": ["kubernetes"], "best_projects": []}
+    config = {"targets": {}}
+
+    generic_title_result = compute_heuristic_score(
+        profile=profile,
+        config=config,
+        opening_title="Platform Engineer",
+        opening_location=None,
+        is_remote=False,
+        company_name="Acme",
+        company_research={},
+        apply_url="https://acme.com/apply",
+        opening_description="You'll own our Kubernetes clusters and CI/CD pipelines.",
+    )
+    assert "Stack overlap in kubernetes" in generic_title_result.reason
+
+    no_description_result = compute_heuristic_score(
+        profile=profile,
+        config=config,
+        opening_title="Platform Engineer",
+        opening_location=None,
+        is_remote=False,
+        company_name="Acme",
+        company_research={},
+        apply_url="https://acme.com/apply",
+    )
+    assert "kubernetes" not in no_description_result.reason.lower()
+
+
+def test_compute_heuristic_score_credits_matching_project():
+    profile = {
+        "roles_sought": [],
+        "skills": [],
+        "best_projects": [{"name": "Radar", "stack": ["fastapi", "postgresql"]}],
+    }
+    config = {"targets": {}}
+
+    result = compute_heuristic_score(
+        profile=profile,
+        config=config,
+        opening_title="Backend Engineer",
+        opening_location=None,
+        is_remote=False,
+        company_name="Acme",
+        company_research={},
+        apply_url="https://acme.com/apply",
+        opening_description="Build APIs with FastAPI backed by PostgreSQL.",
+    )
+    assert "Project 'Radar'" in result.reason

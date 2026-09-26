@@ -29,6 +29,7 @@ def compute_heuristic_score(
     company_name: str,
     company_research: dict[str, Any],
     apply_url: str,
+    opening_description: str | None = None,
 ) -> ScoreResult:
     """Heuristic scoring when external LLM is offline or budget exceeded."""
     score = 60
@@ -41,6 +42,9 @@ def compute_heuristic_score(
             sources.append(src)
 
     title_lower = opening_title.lower()
+    # Skill/stack matching looks at the description too, not just the title —
+    # most postings name their stack in the body, not the job title.
+    combined_lower = f"{title_lower} {(opening_description or '').lower()}"
     profile_skills = [s.lower() for s in profile.get("skills", [])]
     profile_roles = [r.lower() for r in profile.get("roles_sought", [])]
 
@@ -61,13 +65,26 @@ def compute_heuristic_score(
         reasons.append("Exact seniority alignment for early-career builder")
 
     # Stack match bonus
+    company_summary_lower = (company_research.get("summary") or "").lower()
     skill_hits = []
     for skill in profile_skills:
-        if skill in title_lower or (company_research.get("summary") and skill in company_research.get("summary", "").lower()):
+        if skill in combined_lower or skill in company_summary_lower:
             skill_hits.append(skill)
     if skill_hits:
         score += min(15, len(skill_hits) * 5)
         reasons.append(f"Stack overlap in {', '.join(skill_hits[:3])}")
+
+    # Project relevance bonus: does a project's own stack overlap with what
+    # this opening is asking for? Surfaces the strongest matching project by
+    # name instead of only citing raw skill keywords.
+    for project in profile.get("best_projects", []):
+        if not isinstance(project, dict):
+            continue
+        project_stack = [s.lower() for s in project.get("stack", []) if isinstance(s, str)]
+        if project_stack and any(s in combined_lower for s in project_stack):
+            score += 6
+            reasons.append(f"Project '{project.get('name', 'a past project')}' uses a similar stack")
+            break
 
     # Location / Remote bonus
     if is_remote:
@@ -149,6 +166,7 @@ class FitScorer:
                 company.get("name", ""),
                 company,
                 apply_url,
+                opening.get("description"),
             )
 
         prompt = f"""You are the Job Fit Evaluator for Job Radar. Evaluate the candidate fit for this opening on a 0-100 scale.
@@ -160,6 +178,7 @@ Target Roles: {profile.get("roles_sought")}
 Seniority: {profile.get("seniority")}
 Skills: {profile.get("skills")}
 Key Projects: {json.dumps(profile.get("best_projects", []))}
+Proof Points: {json.dumps(profile.get("proof_points", []))}
 
 Target Preferences (from config.yaml):
 Priorities: {config.get("priorities")}
@@ -219,4 +238,5 @@ Output ONLY valid JSON in this exact schema:
             company.get("name", ""),
             company,
             apply_url,
+            opening.get("description"),
         )
