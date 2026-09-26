@@ -30,6 +30,7 @@ from radar.normalize import (
     normalize_title,
 )
 from radar.notifier import _sanitize
+from radar.profile import build_profile, load_profile, save_profile
 from radar.score import FitScorer, compute_heuristic_score
 from radar.sources.ats import ATSSource
 from radar.sources.base import RawOpening
@@ -612,3 +613,38 @@ def test_companies_overview_and_stage_filter(test_db):
     assert len(beta_openings) == 1
     assert beta_openings[0]["title"] == "AI Engineer"
     assert beta_openings[0]["score"] is None
+
+
+def test_build_profile_overwrites_roles_sought_and_seniority(tmp_path):
+    # Regression: the dashboard's Setup tab let you edit target roles/experience
+    # level, but build_profile() never wrote them into profile.json — so the
+    # sidebar and scoring kept using stale defaults no matter what you typed.
+    profile_path = tmp_path / "profile.json"
+    save_profile(
+        {
+            "name": "Test User",
+            "roles_sought": ["AI Engineer", "Machine Learning Engineer"],
+            "seniority": ["intern", "fresher"],
+            "skills": ["Python"],
+        },
+        str(profile_path),
+    )
+
+    build_profile(
+        roles_sought=["backend engineer", "data engineer"],
+        seniority=["junior", "mid"],
+        output=str(profile_path),
+    )
+
+    updated = load_profile(str(profile_path))
+    assert updated["roles_sought"] == ["backend engineer", "data engineer"]
+    assert updated["seniority"] == ["junior", "mid"]
+    # Untouched fields survive.
+    assert updated["name"] == "Test User"
+    assert updated["skills"] == ["Python"]
+
+    # Omitting roles_sought/seniority (e.g. CLI usage without the Setup form)
+    # leaves whatever is already stored alone.
+    build_profile(output=str(profile_path))
+    unchanged = load_profile(str(profile_path))
+    assert unchanged["roles_sought"] == ["backend engineer", "data engineer"]
