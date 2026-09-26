@@ -1,0 +1,11 @@
+[theme]
+# app.py's custom CSS (job cards, badges, etc.) is designed for a light
+# background with dark text. Without this, Streamlit auto-detects the
+# viewer's OS/browser dark-mode preference, which then clashes with the
+# hardcoded light card colors and makes text (job titles, "Why it fits")
+# nearly invisible — dark-on-dark or light-on-light depending on the element.
+base = "light"
+primaryColor = "#EF4444"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F5F9"
+textColor = "#1E293B"

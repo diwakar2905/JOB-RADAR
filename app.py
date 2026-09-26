@@ -313,11 +313,11 @@ def render_matches_list(status_filter: str):
             f'<span class="{score_class}">Fit Score: {score}/100</span>'
             f'<span class="source-tag" style="margin-left: 8px;">{safe_source}</span>'
             f"{warning_badge}"
-            f'<h3 style="margin-top: 8px; margin-bottom: 4px;">{safe_title}</h3>'
+            f'<h3 style="margin-top: 8px; margin-bottom: 4px; color: #0F172A;">{safe_title}</h3>'
             f'<div style="font-size: 1.05rem; font-weight: 600; color: #334155;">'
             f'{safe_company} · <span style="font-weight: 400; color: #64748B;">{safe_location}{remote_suffix}</span>'
             f"</div></div></div>"
-            f'<div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px;">'
+            f'<div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px; color: #1E293B;">'
             f"<strong>Why it fits:</strong> {safe_reason}"
             f"</div></div>"
         )
