@@ -70,3 +70,4 @@ max_new_matches_per_run: 50
 monthly_spend_cap_cents: 500  # $5 cap for API queries per month
 hide_older_than_days: 30
 min_fit_score_alert: 80
+min_score_to_store: 60  # matches scoring below this are discarded entirely (quality over quantity)

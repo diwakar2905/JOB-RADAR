@@ -30,7 +30,15 @@ from radar.normalize import (
     normalize_title,
 )
 from radar.notifier import _sanitize
-from radar.profile import build_profile, extract_profile_with_llm, load_profile, save_profile
+from radar.profile import (
+    build_profile,
+    extract_profile_with_llm,
+    find_matching_keywords,
+    load_profile,
+    parse_resume_text,
+    resume_text_looks_unreadable,
+    save_profile,
+)
 from radar.score import FitScorer, compute_heuristic_score
 from radar.sources.ats import ATSSource
 from radar.sources.base import RawOpening
@@ -899,3 +907,137 @@ def test_pipeline_survives_one_bad_opening_and_still_finishes(tmp_path, monkeypa
     assert result["new_openings"] == 1
     assert len(result["errors"]) == 1
     assert "Acme" in result["errors"][0]
+
+
+def test_find_matching_keywords_handles_symbol_suffixed_tokens():
+    # Regression: plain \b fails on tokens ending in a non-word char like
+    # "C++"/"C#" because \b needs a word/non-word transition that never
+    # actually occurs at that boundary.
+    text = "Experienced in C++ and C# for backend systems, plus Python."
+    hits = find_matching_keywords(text, ["C++", "C#", "Python", "Rust"])
+    assert hits == {"C++", "C#", "Python"}
+
+
+def test_find_matching_keywords_is_case_insensitive_and_whole_token():
+    text = "Built APIs with fastapi and used reactjs on the frontend."
+    hits = find_matching_keywords(text, ["FastAPI", "React", "Go"])
+    assert hits == {"FastAPI"}  # "React" must not fuzzy-match "reactjs"
+
+
+def test_resume_text_looks_unreadable_for_short_extraction():
+    assert resume_text_looks_unreadable("") is True
+    assert resume_text_looks_unreadable("garbled \x00\x01") is True
+    assert resume_text_looks_unreadable("x" * 199) is True
+    assert resume_text_looks_unreadable("x" * 250) is False
+
+
+def test_parse_resume_text_falls_back_to_byte_scan_when_pypdf_extracts_nothing(tmp_path, monkeypatch):
+    # Simulates a scanned/image-only PDF where pypdf's extract_text() returns
+    # empty strings for every page but the raw bytes still contain a
+    # printable text run (e.g. from an embedded fallback layer).
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakeReader:
+        def __init__(self, path):
+            self.pages = [FakePage()]
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pypdf",
+        type("FakeModule", (), {"PdfReader": FakeReader}),
+    )
+
+    resume_pdf = tmp_path / "resume.pdf"
+    padding = b"\x00" * 20
+    embedded_text = b"Experienced Python and FastAPI backend engineer with three shipped projects"
+    resume_pdf.write_bytes(b"%PDF-1.4\n" + padding + embedded_text + padding)
+
+    text = parse_resume_text(str(resume_pdf))
+    assert "Python" in text
+    assert "FastAPI" in text
+
+
+def test_build_profile_uses_resume_text_override_and_flags_extraction_ok(tmp_path):
+    output = tmp_path / "profile.json"
+    resume_text = (
+        "Jane Doe — backend engineer with Python, FastAPI, PostgreSQL, and Docker experience. "
+        "Built and shipped three production services handling real user traffic, including a "
+        "payments API processing thousands of requests per day and an internal analytics platform."
+    )
+    profile = build_profile(resume_text_override=resume_text, output=str(output))
+
+    assert profile["resume_extraction_ok"] is True
+    assert profile["resume_chars_extracted"] == len(resume_text)
+    assert "Python" in profile["skills"]
+    assert "FastAPI" in profile["skills"]
+    assert "PostgreSQL" in profile["skills"]
+
+
+def test_build_profile_flags_unreadable_extraction(tmp_path):
+    output = tmp_path / "profile.json"
+    profile = build_profile(resume_text_override="   ", output=str(output))
+    assert profile["resume_extraction_ok"] is False
+    assert profile["resume_chars_extracted"] == len("   ")
+
+
+def test_min_score_to_store_discards_low_quality_matches(tmp_path, monkeypatch):
+    # Regression: "quality over quantity" — a match scoring below the
+    # configured min_score_to_store must be skipped entirely (not stored,
+    # not counted, not alerted on), even though it would have passed every
+    # other filter.
+    import run as run_module
+    from radar.db import get_connection
+    from radar.sources.base import RawOpening
+
+    monkeypatch.chdir(tmp_path)
+
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(
+        "targets:\n  roles: [backend engineer]\n  seniority: [intern, fresher, junior]\n"
+        "dealbreakers: []\navoid_companies: []\nwatchlist_ats: {}\n"
+        "min_score_to_store: 95\n"
+    )
+    profile_json = tmp_path / "profile.json"
+    profile_json.write_text('{"name": "Test", "roles_sought": ["backend engineer"], "skills": ["python"]}')
+
+    class FakeATSSource:
+        name = "ats"
+
+        def __init__(self, watchlist_config=None):
+            pass
+
+        def discover(self, cursor=None):
+            return (
+                [
+                    RawOpening(
+                        company_name="Acme",
+                        company_domain="acme.com",
+                        title="Backend Engineer",
+                        apply_url="https://acme.com/apply",
+                        source="ats",
+                        location="Remote",
+                        remote=True,
+                    )
+                ],
+                None,
+            )
+
+    monkeypatch.setattr(run_module, "ATSSource", FakeATSSource)
+    monkeypatch.setattr(run_module, "check_apply_link", lambda url: True)
+
+    result = run_module.execute_pipeline(
+        config_path=str(config_yaml),
+        profile_path=str(profile_json),
+        dry_run=True,
+        single_source="ats",
+    )
+
+    # Heuristic score for this opening tops out well under 95, so it must be
+    # discarded rather than stored/counted.
+    assert result["new_openings"] == 0
+
+    conn = get_connection(tmp_path / "db.sqlite")
+    assert conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0] == 0
+    conn.close()
