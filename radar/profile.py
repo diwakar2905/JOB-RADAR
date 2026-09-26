@@ -144,12 +144,23 @@ def build_profile(
     github: str | None = None,
     site: str | None = None,
     output: str = "profile.json",
+    roles_sought: list[str] | None = None,
+    seniority: list[str] | None = None,
 ) -> dict[str, Any]:
     """Extracts resume/GitHub/site signal into profile.json and saves it.
 
     Shared by the CLI (`python -m radar profile`) and the dashboard's Setup tab.
+    roles_sought/seniority, when given, are explicit user input (e.g. from the
+    Setup tab's targeting fields) and fully replace the stored values, rather
+    than merging like skills do — otherwise editing your target roles in the
+    dashboard has no effect on the profile that scoring and the sidebar use.
     """
     profile = load_profile(output)
+
+    if roles_sought is not None:
+        profile["roles_sought"] = roles_sought
+    if seniority is not None:
+        profile["seniority"] = seniority
 
     if resume_path:
         resume_text = parse_resume_text(resume_path)

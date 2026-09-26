@@ -232,10 +232,18 @@ with tab_setup:
             with open(resume_path, "wb") as f:
                 f.write(resume_file.getbuffer())
 
-        with st.spinner("Building your profile from resume / GitHub / site..."):
-            build_profile(resume_path=resume_path, github=github_username or None, site=site_url or None)
+        parsed_roles = [r.strip() for r in roles_text.split(",") if r.strip()]
 
-        setup_targets["roles"] = [r.strip() for r in roles_text.split(",") if r.strip()]
+        with st.spinner("Building your profile from resume / GitHub / site..."):
+            build_profile(
+                resume_path=resume_path,
+                github=github_username or None,
+                site=site_url or None,
+                roles_sought=parsed_roles,
+                seniority=seniority_sel,
+            )
+
+        setup_targets["roles"] = parsed_roles
         setup_targets["seniority"] = seniority_sel
         setup_targets["locations"] = [loc.strip() for loc in locations_text.split(",") if loc.strip()]
         setup_targets["max_years_experience"] = int(max_years)
