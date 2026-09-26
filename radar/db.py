@@ -235,6 +235,13 @@ def opening_exists_by_hash(dedupe_hash: str, db_path: Path = DEFAULT_DB_PATH) ->
         return cur.fetchone() is not None
 
 
+def get_opening_id_by_hash(dedupe_hash: str, db_path: Path = DEFAULT_DB_PATH) -> int | None:
+    with get_connection(db_path) as conn:
+        cur = conn.execute("SELECT id FROM openings WHERE dedupe_hash = ?", (dedupe_hash,))
+        row = cur.fetchone()
+        return row["id"] if row else None
+
+
 def insert_opening(
     company_id: int,
     title: str,
@@ -248,26 +255,37 @@ def insert_opening(
     status_head_ok: bool = True,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
+    """Inserts a new opening. If dedupe_hash already exists — e.g. two raw
+    items in the same run hash identically (same source, or two sources
+    surfacing the same posting) — this is idempotent: it returns the existing
+    opening's id instead of raising, so one duplicate never aborts a whole
+    run that already stored many good matches."""
     with get_connection(db_path) as conn:
-        cur = conn.execute(
-            """INSERT INTO openings
-               (company_id, title, seniority, location, remote, apply_url, source, posted_at, dedupe_hash, status_head_ok)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                company_id,
-                title,
-                seniority,
-                location,
-                1 if remote else 0,
-                apply_url,
-                source,
-                posted_at,
-                dedupe_hash,
-                1 if status_head_ok else 0,
-            ),
-        )
-        conn.commit()
-        return cur.lastrowid
+        try:
+            cur = conn.execute(
+                """INSERT INTO openings
+                   (company_id, title, seniority, location, remote, apply_url, source, posted_at, dedupe_hash, status_head_ok)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    company_id,
+                    title,
+                    seniority,
+                    location,
+                    1 if remote else 0,
+                    apply_url,
+                    source,
+                    posted_at,
+                    dedupe_hash,
+                    1 if status_head_ok else 0,
+                ),
+            )
+            conn.commit()
+            return cur.lastrowid
+        except sqlite3.IntegrityError:
+            existing_id = get_opening_id_by_hash(dedupe_hash, db_path)
+            if existing_id is not None:
+                return existing_id
+            raise
 
 
 def insert_match(
@@ -278,15 +296,25 @@ def insert_match(
     status: str = "new",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
+    """Inserts a match. matches.opening_id is UNIQUE, so if insert_opening
+    just returned an already-existing opening id (see its docstring), this
+    would otherwise raise on the second insert for the same opening — return
+    the existing match's id instead of crashing the run."""
     sources_json = json.dumps(sources)
     with get_connection(db_path) as conn:
-        cur = conn.execute(
-            """INSERT INTO matches (opening_id, score, reason, sources, status)
-               VALUES (?, ?, ?, ?, ?)""",
-            (opening_id, score, reason, sources_json, status),
-        )
-        conn.commit()
-        return cur.lastrowid
+        try:
+            cur = conn.execute(
+                """INSERT INTO matches (opening_id, score, reason, sources, status)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (opening_id, score, reason, sources_json, status),
+            )
+            conn.commit()
+            return cur.lastrowid
+        except sqlite3.IntegrityError:
+            existing = conn.execute("SELECT id FROM matches WHERE opening_id = ?", (opening_id,)).fetchone()
+            if existing is not None:
+                return existing["id"]
+            raise
 
 
 def update_match_status(match_id: int, status: str, db_path: Path = DEFAULT_DB_PATH) -> None:

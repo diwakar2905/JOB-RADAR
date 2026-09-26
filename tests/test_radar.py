@@ -775,3 +775,127 @@ def test_compute_heuristic_score_credits_matching_project():
         opening_description="Build APIs with FastAPI backed by PostgreSQL.",
     )
     assert "Project 'Radar'" in result.reason
+
+
+def test_insert_opening_is_idempotent_on_duplicate_dedupe_hash(test_db):
+    # Regression: a run that hit the same dedupe_hash twice (two raw items
+    # from the same or different sources hashing identically) crashed the
+    # entire pipeline with sqlite3.IntegrityError, losing every match already
+    # stored earlier in that run. insert_opening/insert_match must be
+    # idempotent instead: return the existing row's id rather than raising.
+    company_id = get_or_create_company("Ramp", "ramp.com", db_path=test_db)
+    dedupe_hash = "duplicate-hash-1"
+
+    first_opening_id = insert_opening(
+        company_id=company_id,
+        title="Backend Engineer",
+        seniority="junior",
+        location="Remote",
+        remote=True,
+        apply_url="https://ramp.com/apply/1",
+        source="ats",
+        dedupe_hash=dedupe_hash,
+        db_path=test_db,
+    )
+    first_match_id = insert_match(
+        opening_id=first_opening_id,
+        score=80,
+        reason="first pass",
+        sources=["https://ramp.com/apply/1"],
+        db_path=test_db,
+    )
+
+    second_opening_id = insert_opening(
+        company_id=company_id,
+        title="Backend Engineer",
+        seniority="junior",
+        location="Remote",
+        remote=True,
+        apply_url="https://ramp.com/apply/2",
+        source="ats",
+        dedupe_hash=dedupe_hash,
+        db_path=test_db,
+    )
+    second_match_id = insert_match(
+        opening_id=second_opening_id,
+        score=85,
+        reason="second pass",
+        sources=["https://ramp.com/apply/2"],
+        db_path=test_db,
+    )
+
+    assert second_opening_id == first_opening_id
+    assert second_match_id == first_match_id
+    assert opening_exists_by_hash(dedupe_hash, db_path=test_db)
+
+
+def test_pipeline_survives_one_bad_opening_and_still_finishes(tmp_path, monkeypatch):
+    # Regression: an unhandled exception on a single opening used to abort
+    # execute_pipeline entirely, so record_run_finish (and the run's stats)
+    # never happened even though other openings had already been stored.
+    import run as run_module
+    from radar.sources.base import RawOpening
+
+    monkeypatch.chdir(tmp_path)
+
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(
+        "targets:\n  roles: [backend engineer]\n  seniority: [intern, fresher, junior]\n"
+        "dealbreakers: []\navoid_companies: []\nwatchlist_ats: {}\n"
+    )
+    profile_json = tmp_path / "profile.json"
+    profile_json.write_text('{"name": "Test", "roles_sought": ["backend engineer"], "skills": ["python"]}')
+
+    class FakeATSSource:
+        name = "ats"
+
+        def __init__(self, watchlist_config=None):
+            pass
+
+        def discover(self, cursor=None):
+            good_one = RawOpening(
+                company_name="Acme",
+                company_domain="acme.com",
+                title="Backend Engineer",
+                apply_url="https://acme.com/apply",
+                source="ats",
+                location="Remote",
+                remote=True,
+            )
+            good_two = RawOpening(
+                company_name="Beta",
+                company_domain="beta.com",
+                title="Backend Engineer",
+                apply_url="https://beta.com/apply",
+                source="ats",
+                location="Remote",
+                remote=True,
+            )
+            return [good_one, good_two], None
+
+    call_count = {"n": 0}
+    real_research = run_module.CompanyResearcher.research_company
+
+    def flaky_research(self, company_name, company_domain, db_path=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated unexpected failure on the first opening")
+        kwargs = {} if db_path is None else {"db_path": db_path}
+        return real_research(self, company_name, company_domain, **kwargs)
+
+    monkeypatch.setattr(run_module, "ATSSource", FakeATSSource)
+    monkeypatch.setattr(run_module.CompanyResearcher, "research_company", flaky_research)
+    monkeypatch.setattr(run_module, "check_apply_link", lambda url: True)
+
+    result = run_module.execute_pipeline(
+        config_path=str(config_yaml),
+        profile_path=str(profile_json),
+        dry_run=False,
+        single_source="ats",
+    )
+
+    # The second (good) opening was still stored and the run finished cleanly,
+    # despite the first one blowing up.
+    assert result["new_openings"] == 1
+    assert len(result["errors"]) == 1
+    assert "Acme" in result["errors"][0]
