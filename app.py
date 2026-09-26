@@ -193,9 +193,9 @@ with tab_setup:
         )
         col_a, col_b = st.columns(2)
         with col_a:
-            github_username = st.text_input("GitHub username (optional)")
+            github_username = st.text_input("GitHub username (optional)", autocomplete="username")
         with col_b:
-            site_url = st.text_input("Portfolio / personal site (optional)")
+            site_url = st.text_input("Portfolio / personal site (optional)", autocomplete="url")
 
         st.divider()
         st.markdown("**Roles you're targeting** — comma-separated, add as many as you like")
@@ -315,6 +315,7 @@ with f_col1:
         "Search by company or role keyword",
         placeholder="e.g. AI, Backend, Cursor, Postman",
         label_visibility="collapsed",
+        autocomplete="off",
     )
 with f_col2:
     min_score = st.slider("Min Fit Score", 0, 100, 50, step=5, label_visibility="collapsed")
