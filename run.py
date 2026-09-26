@@ -81,6 +81,118 @@ def save_config(config: dict[str, Any], config_path: str = "config.yaml") -> Non
         yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
 
 
+def _process_one_opening(
+    item,
+    config: dict[str, Any],
+    profile: dict[str, Any],
+    researcher: CompanyResearcher,
+    scorer: FitScorer,
+    dry_run: bool,
+    alert_threshold: int,
+    top_matches_found: list[tuple[str, str, int]],
+) -> bool:
+    """Normalizes, filters, researches, scores, and (outside dry-run) stores a
+    single raw opening. Returns True if it counted as a new stored/previewed
+    match, False if it was skipped (already known or filtered out). Lets
+    exceptions propagate — the caller decides how to handle a bad item so one
+    duplicate or malformed record never aborts an otherwise-successful run.
+    """
+    # 1. Normalization & Deduplication Hash
+    norm_loc, is_remote = normalize_location(item.location, item.remote)
+    dedupe_hash = compute_dedupe_hash(item.company_domain, item.title, norm_loc)
+
+    if not dry_run and opening_exists_by_hash(dedupe_hash):
+        return False  # Skip already known opening
+
+    # 2. Filter dealbreakers and role targets
+    item.location = norm_loc
+    item.remote = is_remote
+    filter_res = apply_filters(item, config)
+    if not filter_res.passed:
+        return False
+
+    # 3. Verify apply link health
+    link_healthy = check_apply_link(item.apply_url)
+    if not link_healthy:
+        print(f"[!] Warning: Dead or unreachable apply link for {item.company_name} - {item.title}: {item.apply_url}")
+
+    inferred_sen = item.seniority or infer_seniority(item.title, item.description)
+
+    if dry_run:
+        # Contract: --dry-run never writes to the DB and never spends LLM/API
+        # budget. Skip real company research (Tavily + DB writes) and real
+        # scoring (Claude/Ollama) entirely; use a free heuristic-only preview.
+        preview_company = {
+            "id": None,
+            "name": item.company_name,
+            "domain": item.company_domain,
+            "stage": None,
+            "funding": None,
+            "founders": None,
+            "summary": "",
+            "sources": [],
+        }
+        score_res = compute_heuristic_score(
+            profile,
+            config,
+            item.title,
+            item.location,
+            item.remote,
+            item.company_name,
+            preview_company,
+            item.apply_url,
+            item.description,
+        )
+    else:
+        # 4. Research company (14-day cached)
+        company_info = researcher.research_company(item.company_name, item.company_domain)
+
+        # 5. Score Fit (0-100) with citation URLs
+        opening_dict = {
+            "title": item.title,
+            "location": item.location,
+            "remote": item.remote,
+            "apply_url": item.apply_url,
+            "description": item.description,
+            "seniority": inferred_sen,
+        }
+        score_res = scorer.score_fit(profile, config, opening_dict, company_info)
+
+    print(f"  + [{score_res.score}/100] {item.company_name} - {item.title} ({norm_loc})")
+    print(f"    Reason: {score_res.reason}")
+
+    if dry_run:
+        return True
+
+    # 6. Store in SQLite
+    company_id = company_info["id"]
+    opening_id = insert_opening(
+        company_id=company_id,
+        title=item.title,
+        seniority=inferred_sen,
+        location=norm_loc,
+        remote=is_remote,
+        apply_url=item.apply_url,
+        source=item.source,
+        posted_at=item.posted_at,
+        dedupe_hash=dedupe_hash,
+        status_head_ok=link_healthy,
+    )
+
+    insert_match(
+        opening_id=opening_id,
+        score=score_res.score,
+        reason=score_res.reason,
+        sources=score_res.sources,
+        status="new",
+    )
+
+    if score_res.score >= alert_threshold:
+        top_matches_found.append((item.company_name, item.title, score_res.score))
+
+    return True
+
+
 def execute_pipeline(
     config_path: str = "config.yaml",
     profile_path: str = "profile.json",
@@ -125,7 +237,7 @@ def execute_pipeline(
 
     new_openings_count = 0
     errors: list[str] = []
-    top_matches_found = []
+    top_matches_found: list[tuple[str, str, int]] = []
 
     for source in sources_to_run:
         print(f"\n--- Checking source: {source.name} ---")
@@ -154,100 +266,21 @@ def execute_pipeline(
                 print(f"Reached max limit of {max_matches} new matches for this run.")
                 break
 
-            # 1. Normalization & Deduplication Hash
-            norm_loc, is_remote = normalize_location(item.location, item.remote)
-            dedupe_hash = compute_dedupe_hash(item.company_domain, item.title, norm_loc)
-
-            if not dry_run and opening_exists_by_hash(dedupe_hash):
-                continue  # Skip already known opening
-
-            # 2. Filter dealbreakers and role targets
-            item.location = norm_loc
-            item.remote = is_remote
-            filter_res = apply_filters(item, config)
-            if not filter_res.passed:
-                continue
-
-            # 3. Verify apply link health
-            link_healthy = check_apply_link(item.apply_url)
-            if not link_healthy:
-                print(f"[!] Warning: Dead or unreachable apply link for {item.company_name} - {item.title}: {item.apply_url}")
-
-            inferred_sen = item.seniority or infer_seniority(item.title, item.description)
-
-            if dry_run:
-                # Contract: --dry-run never writes to the DB and never spends LLM/API
-                # budget. Skip real company research (Tavily + DB writes) and real
-                # scoring (Claude/Ollama) entirely; use a free heuristic-only preview.
-                preview_company = {
-                    "id": None,
-                    "name": item.company_name,
-                    "domain": item.company_domain,
-                    "stage": None,
-                    "funding": None,
-                    "founders": None,
-                    "summary": "",
-                    "sources": [],
-                }
-                score_res = compute_heuristic_score(
-                    profile,
-                    config,
-                    item.title,
-                    item.location,
-                    item.remote,
-                    item.company_name,
-                    preview_company,
-                    item.apply_url,
-                    item.description,
+            try:
+                stored = _process_one_opening(
+                    item, config, profile, researcher, scorer, dry_run, alert_threshold, top_matches_found
                 )
-            else:
-                # 4. Research company (14-day cached)
-                company_info = researcher.research_company(item.company_name, item.company_domain)
-
-                # 5. Score Fit (0-100) with citation URLs
-                opening_dict = {
-                    "title": item.title,
-                    "location": item.location,
-                    "remote": item.remote,
-                    "apply_url": item.apply_url,
-                    "description": item.description,
-                    "seniority": inferred_sen,
-                }
-                score_res = scorer.score_fit(profile, config, opening_dict, company_info)
-
-            print(f"  + [{score_res.score}/100] {item.company_name} - {item.title} ({norm_loc})")
-            print(f"    Reason: {score_res.reason}")
-
-            if dry_run:
-                new_openings_count += 1
+            except Exception as e:
+                # One bad item (a duplicate hash race, a malformed field, an
+                # unexpected API response) must never abort a run that has
+                # already stored good matches — log it and keep going.
+                err_msg = f"Error processing '{item.title}' at {item.company_name}: {e}"
+                print(f"[!] {err_msg}")
+                errors.append(err_msg)
                 continue
 
-            # 6. Store in SQLite
-            company_id = company_info["id"]
-            opening_id = insert_opening(
-                company_id=company_id,
-                title=item.title,
-                seniority=inferred_sen,
-                location=norm_loc,
-                remote=is_remote,
-                apply_url=item.apply_url,
-                source=item.source,
-                posted_at=item.posted_at,
-                dedupe_hash=dedupe_hash,
-                status_head_ok=link_healthy,
-            )
-
-            insert_match(
-                opening_id=opening_id,
-                score=score_res.score,
-                reason=score_res.reason,
-                sources=score_res.sources,
-                status="new",
-            )
-
-            new_openings_count += 1
-            if score_res.score >= alert_threshold:
-                top_matches_found.append((item.company_name, item.title, score_res.score))
+            if stored:
+                new_openings_count += 1
 
     record_run_finish(run_id, new_openings_count, errors)
     print(f"\nCompleted run #{run_id}: stored {new_openings_count} new matches ({len(errors)} errors).")
