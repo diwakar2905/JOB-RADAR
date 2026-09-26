@@ -89,6 +89,7 @@ def _process_one_opening(
     scorer: FitScorer,
     dry_run: bool,
     alert_threshold: int,
+    min_score_to_store: int,
     top_matches_found: list[tuple[str, str, int]],
 ) -> bool:
     """Normalizes, filters, researches, scores, and (outside dry-run) stores a
@@ -158,6 +159,13 @@ def _process_one_opening(
         }
         score_res = scorer.score_fit(profile, config, opening_dict, company_info)
 
+    if score_res.score < min_score_to_store:
+        # Quality-over-quantity gate: don't store/preview mediocre matches at
+        # all, so the queue is a handful of strong fits rather than a long
+        # list of borderline ones.
+        print(f"  - [{score_res.score}/100] {item.company_name} - {item.title} (below min_score_to_store, skipped)")
+        return False
+
     print(f"  + [{score_res.score}/100] {item.company_name} - {item.title} ({norm_loc})")
     print(f"    Reason: {score_res.reason}")
 
@@ -207,6 +215,7 @@ def execute_pipeline(
 
     max_matches = limit or config.get("max_new_matches_per_run", 50)
     alert_threshold = config.get("min_fit_score_alert", 80)
+    min_score_to_store = config.get("min_score_to_store", 60)
 
     # Initialize sources. Merge the static config watchlist with boards that Tavily
     # search auto-discovered in prior runs (the "growth loop" from SPEC.md §8.4).
@@ -268,7 +277,15 @@ def execute_pipeline(
 
             try:
                 stored = _process_one_opening(
-                    item, config, profile, researcher, scorer, dry_run, alert_threshold, top_matches_found
+                    item,
+                    config,
+                    profile,
+                    researcher,
+                    scorer,
+                    dry_run,
+                    alert_threshold,
+                    min_score_to_store,
+                    top_matches_found,
                 )
             except Exception as e:
                 # One bad item (a duplicate hash race, a malformed field, an
