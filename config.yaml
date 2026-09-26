@@ -1,72 +1,71 @@
 targets:
   roles:
-    - AI engineer
-    - Machine Learning engineer
-    - backend engineer
-    - full-stack engineer
-    - software engineer
+  - AI engineer
+  - backend engineer
+  - FastAPI Developer
+  - software engineer
+  - Growth Intern
+  - Data analyst
+  - Data Engineer
   seniority:
-    - intern
-    - fresher
-    - junior
-    - early-career
-    - new grad
+  - intern
+  - fresher
+  - junior
+  - new grad
+  - entry-level
   locations:
-    - India
-    - remote
-    - Bengaluru
-    - Bangalore
-    - Delhi
-    - Hyderabad
-    - Mumbai
-    - Pune
+  - India
+  - remote
+  - Bengaluru
+  - Bangalore
+  - Delhi
+  - Hyderabad
+  - Mumbai
+  - Pune
+  - Indore
+  - Bhopal
   stages:
-    - pre-seed
-    - seed
-    - series-a
-    - series-b
-    - series-c
-  max_years_experience: 2   # roles asking for more than this are filtered out; null = no cap
+  - pre-seed
+  - seed
+  - series-a
+  - series-b
+  - series-c
+  max_years_experience: 1
   remote_ok: true
-
 priorities:
-  - learning
-  - equity
-  - stack-match
-
+- learning
+- equity
+- stack-match
 dealbreakers:
-  - unpaid
-  - on-site outside India
-  - 5+ years experience
-  - senior only
-  - staff only
-  - principal only
-
+- unpaid
+- on-site outside India
+- 5+ years experience
+- senior only
+- staff only
+- principal only
 avoid_companies:
-  - Revature
-  - Infosys
-  - Wipro
-  - TCS
-
+- Revature
+- Infosys
+- Wipro
+- TCS
 watchlist_ats:
   greenhouse:
-    - postman
-    - browserstack
-    - perplexity
-    - mistral
-    - replicate
-    - together
+  - postman
+  - browserstack
+  - perplexity
+  - mistral
+  - replicate
+  - together
   lever:
-    - hasura
+  - hasura
   ashby:
-    - cursor
-    - modal
-    - elevenlabs
-    - ramp
-    - retain
-
+  - cursor
+  - modal
+  - elevenlabs
+  - ramp
+  - retain
 schedule_hours: 6
 max_new_matches_per_run: 50
-monthly_spend_cap_cents: 500  # $5 cap for API queries per month
+monthly_spend_cap_cents: 500
 hide_older_than_days: 30
 min_fit_score_alert: 80
