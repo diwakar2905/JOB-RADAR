@@ -291,28 +291,31 @@ def render_matches_list(status_filter: str):
         safe_location = html.escape(str(m["opening_location"] or ""))
         safe_reason = html.escape(str(m["reason"]))
 
+        # Built as a single line (no embedded blank/whitespace-only lines): a blank
+        # line in the middle of a Markdown HTML block terminates the block early,
+        # so the remaining tags get rendered as escaped text instead of HTML.
+        warning_badge = "" if link_healthy else '<span class="link-warning" style="margin-left: 8px;">⚠️ Verify Apply Link</span>'
+        # normalize_location() already turns a remote opening's location into the
+        # literal string "Remote", so only append the "(Remote)" suffix when the
+        # location text doesn't already say so (avoids "Remote (Remote)").
+        remote_suffix = " (Remote)" if m["remote"] and "remote" not in (m["opening_location"] or "").lower() else ""
+        job_card_html = (
+            f'<div class="job-card">'
+            f'<div style="display: flex; justify-content: space-between; align-items: flex-start;"><div>'
+            f'<span class="{score_class}">Fit Score: {score}/100</span>'
+            f'<span class="source-tag" style="margin-left: 8px;">{safe_source}</span>'
+            f"{warning_badge}"
+            f'<h3 style="margin-top: 8px; margin-bottom: 4px;">{safe_title}</h3>'
+            f'<div style="font-size: 1.05rem; font-weight: 600; color: #334155;">'
+            f'{safe_company} · <span style="font-weight: 400; color: #64748B;">{safe_location}{remote_suffix}</span>'
+            f"</div></div></div>"
+            f'<div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px;">'
+            f"<strong>Why it fits:</strong> {safe_reason}"
+            f"</div></div>"
+        )
+
         with st.container():
-            st.markdown(
-                f"""
-            <div class="job-card">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <span class="{score_class}">Fit Score: {score}/100</span>
-                        <span class="source-tag" style="margin-left: 8px;">{safe_source}</span>
-                        {"" if link_healthy else '<span class="link-warning" style="margin-left: 8px;">⚠️ Verify Apply Link</span>'}
-                        <h3 style="margin-top: 8px; margin-bottom: 4px;">{safe_title}</h3>
-                        <div style="font-size: 1.05rem; font-weight: 600; color: #334155;">
-                            {safe_company} · <span style="font-weight: 400; color: #64748B;">{safe_location} {(" (Remote)" if m["remote"] else "")}</span>
-                        </div>
-                    </div>
-                </div>
-                <div style="margin-top: 12px; padding: 10px; background-color: #F8FAFC; border-left: 4px solid #3B82F6; border-radius: 4px;">
-                    <strong>Why it fits:</strong> {safe_reason}
-                </div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
+            st.markdown(job_card_html, unsafe_allow_html=True)
 
             # Action and Details row
             btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([2, 1.5, 1.5, 1.5, 1.5])
@@ -322,7 +325,7 @@ def render_matches_list(status_filter: str):
 
             with btn_col2:
                 if m["status"] != "applied":
-                    if st.button("Mark Applied", key=f"app_{m['match_id']}", use_container_width=True):
+                    if st.button("Mark Applied", key=f"app_{status_filter}_{m['match_id']}", use_container_width=True):
                         update_match_status(m["match_id"], "applied")
                         st.toast(f"Marked {m['company_name']} as Applied!")
                         st.rerun()
@@ -331,17 +334,17 @@ def render_matches_list(status_filter: str):
 
             with btn_col3:
                 if m["status"] == "new":
-                    if st.button("Save for Later", key=f"save_{m['match_id']}", use_container_width=True):
+                    if st.button("Save for Later", key=f"save_{status_filter}_{m['match_id']}", use_container_width=True):
                         update_match_status(m["match_id"], "saved")
                         st.rerun()
                 elif m["status"] == "saved":
-                    if st.button("Move to New", key=f"unsave_{m['match_id']}", use_container_width=True):
+                    if st.button("Move to New", key=f"unsave_{status_filter}_{m['match_id']}", use_container_width=True):
                         update_match_status(m["match_id"], "new")
                         st.rerun()
 
             with btn_col4:
                 if m["status"] != "interviewing":
-                    if st.button("Interviewing", key=f"int_{m['match_id']}", use_container_width=True):
+                    if st.button("Interviewing", key=f"int_{status_filter}_{m['match_id']}", use_container_width=True):
                         update_match_status(m["match_id"], "interviewing")
                         st.toast("Updated to Interviewing stage!")
                         st.rerun()
@@ -350,7 +353,7 @@ def render_matches_list(status_filter: str):
 
             with btn_col5:
                 if m["status"] != "skipped":
-                    if st.button("Skip", key=f"skip_{m['match_id']}", use_container_width=True):
+                    if st.button("Skip", key=f"skip_{status_filter}_{m['match_id']}", use_container_width=True):
                         update_match_status(m["match_id"], "skipped")
                         st.rerun()
 
@@ -376,11 +379,11 @@ def render_matches_list(status_filter: str):
                 fb_col1, fb_col2 = st.columns([1, 4])
                 with fb_col1:
                     cur_fb = m.get("feedback")
-                    if st.button("👍 Good Match", key=f"fb_good_{m['match_id']}"):
+                    if st.button("👍 Good Match", key=f"fb_good_{status_filter}_{m['match_id']}"):
                         update_match_feedback(m["match_id"], "good")
                         st.toast("Feedback recorded!")
                         st.rerun()
-                    if st.button("👎 Poor Fit", key=f"fb_bad_{m['match_id']}"):
+                    if st.button("👎 Poor Fit", key=f"fb_bad_{status_filter}_{m['match_id']}"):
                         update_match_feedback(m["match_id"], "bad")
                         st.toast("Feedback recorded!")
                         st.rerun()
