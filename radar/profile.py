@@ -139,6 +139,52 @@ COMMON_TECH_KEYWORDS = [
 ]
 
 
+def extract_profile_with_llm(
+    resume_text: str,
+    github_summary: dict[str, Any] | None = None,
+    site_text: str | None = None,
+) -> dict[str, Any] | None:
+    """Uses Claude/Ollama (via radar/llm.py) to pull a richer profile out of the
+    resume than keyword-spotting can: a headline, best_projects (with a
+    one-liner and stack per project), and proof_points. Returns None on any
+    failure (no key, no Ollama, bad JSON) so callers can fall back to the
+    keyword-only extraction — this must never be the only path.
+    """
+    from radar.llm import LLMClient
+
+    llm = LLMClient()
+    prompt = f"""Extract a structured candidate profile from the inputs below.
+Only use information present in the inputs. If something is unknown, omit it
+or use an empty list — never invent facts.
+
+Resume text:
+{resume_text[:4000]}
+
+GitHub summary (may be empty):
+{json.dumps(github_summary or {})[:2000]}
+
+Personal site text (may be empty):
+{(site_text or "")[:1500]}
+
+Return ONLY valid JSON matching this schema, nothing else:
+{{
+  "headline": "one line describing the candidate's focus/level",
+  "skills": ["skill1", "skill2"],
+  "best_projects": [{{"name": "...", "one_liner": "...", "stack": ["..."], "url": null}}],
+  "proof_points": ["strongest 3-5 concrete facts: metrics, scale, outcomes"]
+}}"""
+    res_text, _provider = llm.complete(prompt, prefer_quality=True)
+    if not res_text:
+        return None
+    try:
+        clean_json = re.sub(r"^```json\s*", "", res_text.strip(), flags=re.IGNORECASE)
+        clean_json = re.sub(r"```$", "", clean_json.strip())
+        data = json.loads(clean_json)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
 def build_profile(
     resume_path: str | None = None,
     github: str | None = None,
@@ -162,15 +208,6 @@ def build_profile(
     if seniority is not None:
         profile["seniority"] = seniority
 
-    if resume_path:
-        resume_text = parse_resume_text(resume_path)
-        profile["resume_raw_summary"] = resume_text[:1000]
-        found_skills = set(profile.get("skills", []))
-        for tech in COMMON_TECH_KEYWORDS:
-            if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
-                found_skills.add(tech)
-        profile["skills"] = sorted(found_skills)
-
     if github:
         gh_data = fetch_github_profile(github)
         profile["github_summary"] = gh_data
@@ -180,6 +217,29 @@ def build_profile(
 
     if site:
         profile["portfolio_text"] = fetch_personal_site(site)
+
+    if resume_path:
+        resume_text = parse_resume_text(resume_path)
+        profile["resume_raw_summary"] = resume_text[:1000]
+        found_skills = set(profile.get("skills", []))
+        for tech in COMMON_TECH_KEYWORDS:
+            if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
+                found_skills.add(tech)
+        profile["skills"] = sorted(found_skills)
+
+        llm_extracted = extract_profile_with_llm(resume_text, profile.get("github_summary"), profile.get("portfolio_text"))
+        if llm_extracted:
+            if llm_extracted.get("headline"):
+                profile["headline"] = llm_extracted["headline"]
+            llm_skills = [s for s in llm_extracted.get("skills", []) if isinstance(s, str)]
+            if llm_skills:
+                profile["skills"] = sorted(set(profile["skills"]) | set(llm_skills))
+            llm_projects = llm_extracted.get("best_projects")
+            if isinstance(llm_projects, list) and llm_projects:
+                profile["best_projects"] = llm_projects
+            llm_proof = llm_extracted.get("proof_points")
+            if isinstance(llm_proof, list) and llm_proof:
+                profile["proof_points"] = [p for p in llm_proof if isinstance(p, str)]
 
     save_profile(profile, output)
     return profile

@@ -198,6 +198,7 @@ def execute_pipeline(
                     item.company_name,
                     preview_company,
                     item.apply_url,
+                    item.description,
                 )
             else:
                 # 4. Research company (14-day cached)
