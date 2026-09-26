@@ -164,12 +164,33 @@ with tab_setup:
     st.subheader("Set up your search")
     st.caption("Upload your resume once, tell Job Radar what you're targeting, and it handles the rest. No config files to edit.")
 
+    if "setup_message" in st.session_state:
+        _kind, _msg = st.session_state.pop("setup_message")
+        getattr(st, _kind)(_msg)
+
     setup_config = load_config()
     setup_targets = setup_config.get("targets", {})
+    setup_profile_preview = load_profile()
+
+    if setup_profile_preview.get("resume_chars_extracted"):
+        with st.expander("📄 What was extracted from your resume last time"):
+            extraction_note = (
+                " (looks readable)"
+                if setup_profile_preview.get("resume_extraction_ok")
+                else " (looks too short — see warning above)"
+            )
+            st.caption(f"{setup_profile_preview['resume_chars_extracted']} characters extracted" + extraction_note)
+            st.text(setup_profile_preview.get("resume_raw_summary", "")[:1000] or "(nothing extracted)")
 
     with st.form("setup_form"):
         st.markdown("**Resume**")
         resume_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
+        resume_text_pasted = st.text_area(
+            "Or paste your resume text directly — use this if the PDF doesn't parse well "
+            "(scanned copies and some Canva/Word exports have no readable text layer)",
+            height=100,
+            placeholder="Paste resume text here as a fallback...",
+        )
         col_a, col_b = st.columns(2)
         with col_a:
             github_username = st.text_input("GitHub username (optional)")
@@ -196,6 +217,14 @@ with tab_setup:
             min_value=0,
             max_value=20,
             value=int(setup_targets.get("max_years_experience") or 2),
+        )
+
+        min_score_to_store = st.slider(
+            "Minimum fit score to keep (higher = fewer but higher-quality matches)",
+            min_value=0,
+            max_value=100,
+            value=int(setup_config.get("min_score_to_store") or 60),
+            step=5,
         )
 
         st.markdown("**Locations** — comma-separated; include 'remote' if that's okay")
@@ -233,10 +262,12 @@ with tab_setup:
                 f.write(resume_file.getbuffer())
 
         parsed_roles = [r.strip() for r in roles_text.split(",") if r.strip()]
+        pasted_text = resume_text_pasted.strip() or None
 
         with st.spinner("Building your profile from resume / GitHub / site..."):
-            build_profile(
+            updated_profile = build_profile(
                 resume_path=resume_path,
+                resume_text_override=pasted_text,
                 github=github_username or None,
                 site=site_url or None,
                 roles_sought=parsed_roles,
@@ -250,9 +281,31 @@ with tab_setup:
         setup_config["targets"] = setup_targets
         setup_config["dealbreakers"] = [d.strip() for d in dealbreakers_text.split(",") if d.strip()]
         setup_config["avoid_companies"] = [a.strip() for a in avoid_text.split(",") if a.strip()]
+        setup_config["min_score_to_store"] = int(min_score_to_store)
         save_config(setup_config)
 
-        st.success("Saved! Click '⚡ Run Discovery Pipeline Now' in the sidebar to search with your new settings.")
+        # Streamlit clears one-shot st.success()/st.warning() calls on the
+        # st.rerun() below, so stash the resume-extraction diagnostic in
+        # session_state to show it after the rerun instead of losing it.
+        if resume_path or pasted_text:
+            chars = updated_profile.get("resume_chars_extracted", 0)
+            if pasted_text:
+                st.session_state["setup_message"] = ("success", f"Saved! Using your pasted resume text ({chars} characters).")
+            elif updated_profile.get("resume_extraction_ok"):
+                st.session_state["setup_message"] = (
+                    "success",
+                    f"Saved! Extracted {chars} characters from your resume — "
+                    f"skills found: {', '.join(updated_profile.get('skills', [])[:8]) or 'none yet'}.",
+                )
+            else:
+                st.session_state["setup_message"] = (
+                    "warning",
+                    f"Saved, but only {chars} characters came out of that PDF — it may be a scanned/image-based "
+                    "file or use a font pypdf can't read. Try the 'paste your resume text' box above instead.",
+                )
+        else:
+            st.session_state["setup_message"] = ("success", "Saved! Click '⚡ Run Discovery Pipeline Now' in the sidebar.")
+
         st.rerun()
 
 # Filters bar

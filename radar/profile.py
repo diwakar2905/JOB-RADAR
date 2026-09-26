@@ -8,6 +8,13 @@ from typing import Any
 
 import httpx
 
+# Below this many extracted characters, treat the PDF as unreadable rather
+# than a genuinely short resume — pypdf silently returns very little (or
+# nothing) for scanned/image-only PDFs and some Canva/Word exports with
+# embedded custom fonts, with no exception raised. That used to look
+# identical to "nothing changed" from the Setup tab.
+MIN_USABLE_RESUME_CHARS = 200
+
 
 def parse_resume_text(resume_path: str) -> str:
     """Extract plain text from PDF or text file."""
@@ -21,17 +28,46 @@ def parse_resume_text(resume_path: str) -> str:
 
             reader = PdfReader(str(path))
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            return text.strip()
+            text = text.strip()
         except ImportError:
-            # Fallback simple reading if pypdf not ready
+            text = ""
+
+        if len(text) < MIN_USABLE_RESUME_CHARS:
+            # pypdf found little or nothing (likely a scanned/image-based PDF,
+            # or one with an unreadable font/text layer). Fall back to a raw
+            # byte scan for printable text runs — it can occasionally recover
+            # partial text pypdf's proper parser gives up on — but the caller
+            # is responsible for warning the user either way.
             with open(path, "rb") as f:
                 raw = f.read()
-                # Extract ascii-like strings
-                strings = re.findall(rb"[\x20-\x7E\t\r\n]{4,}", raw)
-                return "\n".join(s.decode("latin1", errors="ignore") for s in strings)
+            strings = re.findall(rb"[\x20-\x7E\t\r\n]{4,}", raw)
+            fallback_text = "\n".join(s.decode("latin1", errors="ignore") for s in strings).strip()
+            if len(fallback_text) > len(text):
+                text = fallback_text
+        return text
     else:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read().strip()
+
+
+def resume_text_looks_unreadable(resume_text: str) -> bool:
+    """True if extraction likely failed (scanned PDF, broken font encoding,
+    etc.) rather than the resume genuinely being this short."""
+    return len(resume_text.strip()) < MIN_USABLE_RESUME_CHARS
+
+
+def find_matching_keywords(text: str, vocabulary: list[str]) -> set[str]:
+    """Case-insensitive whole-token match against a skill vocabulary. Uses
+    lookaround instead of \\b: plain \\b fails on tokens ending in a
+    non-word character (e.g. "C++", "C#") because a word boundary requires
+    a transition between a word and non-word character, and neither "+"
+    nor the space/punctuation typically following it qualifies."""
+    hits = set()
+    for term in vocabulary:
+        pattern = r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])"
+        if re.search(pattern, text, re.IGNORECASE):
+            hits.add(term)
+    return hits
 
 
 def fetch_github_profile(username_or_url: str) -> dict[str, Any]:
@@ -118,24 +154,72 @@ def save_profile(data: dict[str, Any], profile_path: str = "profile.json") -> No
 
 
 COMMON_TECH_KEYWORDS = [
+    # Languages
     "Python",
+    "JavaScript",
+    "TypeScript",
+    "Java",
+    "C++",
+    "C#",
+    "Go",
+    "Rust",
+    "Kotlin",
+    "Swift",
+    "SQL",
+    "R",
+    # AI/ML
     "PyTorch",
     "TensorFlow",
-    "FastAPI",
-    "Django",
-    "React",
-    "Next.js",
-    "TypeScript",
-    "Docker",
-    "Kubernetes",
-    "PostgreSQL",
-    "MongoDB",
-    "Redis",
-    "AWS",
-    "GCP",
+    "Keras",
+    "Scikit-learn",
     "LLMs",
     "LangChain",
+    "LlamaIndex",
     "RAG",
+    "Hugging Face",
+    "OpenCV",
+    "NLP",
+    "Computer Vision",
+    "Pandas",
+    "NumPy",
+    # Backend/web frameworks
+    "FastAPI",
+    "Django",
+    "Flask",
+    "Express",
+    "Spring Boot",
+    "Node.js",
+    "GraphQL",
+    "REST",
+    "gRPC",
+    # Frontend
+    "React",
+    "Next.js",
+    "Vue",
+    "Angular",
+    "Tailwind",
+    "HTML",
+    "CSS",
+    # Data/infra
+    "Docker",
+    "Kubernetes",
+    "Terraform",
+    "PostgreSQL",
+    "MySQL",
+    "MongoDB",
+    "Redis",
+    "Kafka",
+    "Elasticsearch",
+    "Spark",
+    "Airflow",
+    # Cloud
+    "AWS",
+    "GCP",
+    "Azure",
+    # Tooling
+    "Git",
+    "CI/CD",
+    "Linux",
 ]
 
 
@@ -192,6 +276,7 @@ def build_profile(
     output: str = "profile.json",
     roles_sought: list[str] | None = None,
     seniority: list[str] | None = None,
+    resume_text_override: str | None = None,
 ) -> dict[str, Any]:
     """Extracts resume/GitHub/site signal into profile.json and saves it.
 
@@ -200,6 +285,9 @@ def build_profile(
     Setup tab's targeting fields) and fully replace the stored values, rather
     than merging like skills do — otherwise editing your target roles in the
     dashboard has no effect on the profile that scoring and the sidebar use.
+    resume_text_override, when given, is used instead of parsing resume_path —
+    a manual-paste fallback for PDFs pypdf can't extract text from (scanned
+    copies, some custom-font exports).
     """
     profile = load_profile(output)
 
@@ -218,13 +306,13 @@ def build_profile(
     if site:
         profile["portfolio_text"] = fetch_personal_site(site)
 
-    if resume_path:
-        resume_text = parse_resume_text(resume_path)
+    if resume_text_override or resume_path:
+        resume_text = resume_text_override or parse_resume_text(resume_path)
         profile["resume_raw_summary"] = resume_text[:1000]
+        profile["resume_chars_extracted"] = len(resume_text)
+        profile["resume_extraction_ok"] = not resume_text_looks_unreadable(resume_text)
         found_skills = set(profile.get("skills", []))
-        for tech in COMMON_TECH_KEYWORDS:
-            if re.search(r"\b" + re.escape(tech) + r"\b", resume_text, re.IGNORECASE):
-                found_skills.add(tech)
+        found_skills |= find_matching_keywords(resume_text, COMMON_TECH_KEYWORDS)
         profile["skills"] = sorted(found_skills)
 
         llm_extracted = extract_profile_with_llm(resume_text, profile.get("github_summary"), profile.get("portfolio_text"))
