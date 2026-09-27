@@ -942,6 +942,7 @@ def test_parse_resume_text_falls_back_to_byte_scan_when_pypdf_extracts_nothing(t
     class FakeReader:
         def __init__(self, path):
             self.pages = [FakePage()]
+            self.is_encrypted = False
 
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -953,6 +954,63 @@ def test_parse_resume_text_falls_back_to_byte_scan_when_pypdf_extracts_nothing(t
     padding = b"\x00" * 20
     embedded_text = b"Experienced Python and FastAPI backend engineer with three shipped projects"
     resume_pdf.write_bytes(b"%PDF-1.4\n" + padding + embedded_text + padding)
+
+    text = parse_resume_text(str(resume_pdf))
+    assert "Python" in text
+    assert "FastAPI" in text
+
+
+def test_parse_resume_text_falls_back_when_pypdf_raises_entirely(tmp_path, monkeypatch):
+    # Regression: parse_resume_text() previously only caught ImportError, so a
+    # corrupt file, unsupported encryption, or a malformed xref table (pypdf
+    # raising PdfReadError/DependencyError/etc.) propagated uncaught, crashing
+    # the whole Setup tab instead of falling back to the byte-scan.
+    class ExplodingReader:
+        def __init__(self, path):
+            raise ValueError("simulated pypdf failure: malformed xref table")
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pypdf",
+        type("FakeModule", (), {"PdfReader": ExplodingReader}),
+    )
+
+    resume_pdf = tmp_path / "resume.pdf"
+    padding = b"\x00" * 20
+    embedded_text = b"Experienced Python and FastAPI backend engineer with three shipped projects"
+    resume_pdf.write_bytes(b"%PDF-1.4\n" + padding + embedded_text + padding)
+
+    text = parse_resume_text(str(resume_pdf))  # must not raise
+    assert "Python" in text
+    assert "FastAPI" in text
+
+
+def test_parse_resume_text_decrypts_empty_password_pdfs(tmp_path, monkeypatch):
+    # Some resume exporters (Word, Canva, print-to-PDF drivers) set an empty
+    # owner password to restrict editing; the content is still meant to be
+    # readable, so parse_resume_text should try decrypt("") before giving up.
+    class FakePage:
+        def extract_text(self):
+            return "Experienced Python and FastAPI backend engineer with three shipped projects." * 2
+
+    class FakeReader:
+        def __init__(self, path):
+            self.pages = [FakePage()]
+            self.is_encrypted = True
+            self.decrypted = False
+
+        def decrypt(self, password):
+            assert password == ""
+            self.decrypted = True
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pypdf",
+        type("FakeModule", (), {"PdfReader": FakeReader}),
+    )
+
+    resume_pdf = tmp_path / "resume.pdf"
+    resume_pdf.write_bytes(b"%PDF-1.4\n" + b"\x00" * 20)
 
     text = parse_resume_text(str(resume_pdf))
     assert "Python" in text

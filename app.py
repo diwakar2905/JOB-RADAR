@@ -255,24 +255,42 @@ with tab_setup:
 
     if submitted:
         resume_path = None
+        resume_write_error = None
         if resume_file is not None:
-            Path("data").mkdir(exist_ok=True)
-            resume_path = "data/resume.pdf"
-            with open(resume_path, "wb") as f:
-                f.write(resume_file.getbuffer())
+            try:
+                Path("data").mkdir(exist_ok=True)
+                resume_path = "data/resume.pdf"
+                with open(resume_path, "wb") as f:
+                    f.write(resume_file.getbuffer())
+            except OSError as e:
+                # Windows-specific gotchas (OneDrive locking the file, a
+                # read-only folder) must show a clear message, not crash
+                # the whole Setup tab.
+                resume_path = None
+                resume_write_error = str(e)
 
         parsed_roles = [r.strip() for r in roles_text.split(",") if r.strip()]
         pasted_text = resume_text_pasted.strip() or None
+        profile_build_error = None
+        updated_profile: dict = {}
 
-        with st.spinner("Building your profile from resume / GitHub / site..."):
-            updated_profile = build_profile(
-                resume_path=resume_path,
-                resume_text_override=pasted_text,
-                github=github_username or None,
-                site=site_url or None,
-                roles_sought=parsed_roles,
-                seniority=seniority_sel,
-            )
+        if resume_write_error is None:
+            with st.spinner("Building your profile from resume / GitHub / site..."):
+                try:
+                    updated_profile = build_profile(
+                        resume_path=resume_path,
+                        resume_text_override=pasted_text,
+                        github=github_username or None,
+                        site=site_url or None,
+                        roles_sought=parsed_roles,
+                        seniority=seniority_sel,
+                    )
+                except Exception as e:
+                    # A resume/profile-building failure (a pypdf edge case,
+                    # a network hiccup on GitHub/site fetch) must never take
+                    # down the whole Setup tab — targeting fields below are
+                    # still saved either way.
+                    profile_build_error = str(e)
 
         setup_targets["roles"] = parsed_roles
         setup_targets["seniority"] = seniority_sel
@@ -287,7 +305,20 @@ with tab_setup:
         # Streamlit clears one-shot st.success()/st.warning() calls on the
         # st.rerun() below, so stash the resume-extraction diagnostic in
         # session_state to show it after the rerun instead of losing it.
-        if resume_path or pasted_text:
+        if resume_write_error:
+            st.session_state["setup_message"] = (
+                "error",
+                f"Saved your targeting settings, but couldn't save the uploaded file: {resume_write_error}. "
+                "Close the file if it's open elsewhere (e.g. a synced OneDrive folder) and try again, or use "
+                "the 'paste your resume text' box instead.",
+            )
+        elif profile_build_error:
+            st.session_state["setup_message"] = (
+                "error",
+                f"Saved your targeting settings, but building your profile from the resume failed: "
+                f"{profile_build_error}. Try the 'paste your resume text' box instead.",
+            )
+        elif resume_path or pasted_text:
             chars = updated_profile.get("resume_chars_extracted", 0)
             if pasted_text:
                 st.session_state["setup_message"] = ("success", f"Saved! Using your pasted resume text ({chars} characters).")

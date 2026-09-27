@@ -23,13 +23,26 @@ def parse_resume_text(resume_path: str) -> str:
         raise FileNotFoundError(f"Resume file not found at {resume_path}")
 
     if path.suffix.lower() == ".pdf":
+        text = ""
         try:
             from pypdf import PdfReader
 
             reader = PdfReader(str(path))
+            if reader.is_encrypted:
+                # Many resume exporters (Word, Canva, some print-to-PDF
+                # drivers) set an empty owner password to restrict editing;
+                # the content is still meant to be readable.
+                try:
+                    reader.decrypt("")
+                except Exception:
+                    pass
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             text = text.strip()
-        except ImportError:
+        except Exception:
+            # Any pypdf failure — not just a missing install, but a corrupt
+            # file, unsupported encryption, a malformed xref table, or a
+            # font pypdf can't decode — must fall through to the raw
+            # byte-scan below instead of crashing the Setup tab.
             text = ""
 
         if len(text) < MIN_USABLE_RESUME_CHARS:
